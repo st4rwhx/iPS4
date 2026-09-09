@@ -137,6 +137,27 @@ jobs:
             exit 1
           fi
 
+      # Same family, next module: attempt 8's build log shows battery.cpp AND cpu.cpp both
+      # compiled clean (confirming the battery patch worked, and that cpu.cpp's own apple/*.cpp
+      # files don't touch IOKit at all -- grepped, only sysctl-family calls there, which do work
+      # on iOS) before hwinfo_disk's apple/disk.cpp hit "fatal error: 'IOKit/IOBSD.h' file not
+      # found". Same root cause (HWINFO_APPLE not distinguishing iOS from macOS), same fix
+      # shape: iOS's sandbox has no raw block-device/BSD-disk enumeration API at all (unlike
+      # battery.cpp's IOKit calls, there isn't even a UIKit-level substitute), so this stubs
+      # getAllDisks() to an empty list rather than porting anything.
+      - name: Patch hwinfo disk module for iOS (no macOS-only IOKit storage API)
+        run: |
+          set -x
+          patch_path="$PWD/runtime/patches/hwinfo-disk-ios.patch"
+          if git -C externals/hwinfo apply --check "$patch_path" 2>/dev/null; then
+            git -C externals/hwinfo apply "$patch_path"
+          elif git -C externals/hwinfo apply --reverse --check "$patch_path" 2>/dev/null; then
+            echo "hwinfo disk iOS patch already applied, skipping"
+          else
+            echo "::error::hwinfo disk iOS patch does not apply cleanly"
+            exit 1
+          fi
+
       - name: Show runner environment
         run: |
           sw_vers || true
