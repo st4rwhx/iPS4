@@ -479,6 +479,20 @@ jobs:
           # outright rather than just defining the macro.
           list(FILTER SHADPS4_IOS_SOURCES EXCLUDE REGEX "/src/core/libraries/usbd/")
 
+          # runtime_client.cpp is the real (ENABLE_BACHATA_RUNTIME-only) implementation of the
+          # Bachata Android runtime IPC client; we never define ENABLE_BACHATA_RUNTIME here, so
+          # every real call site into it in main.cpp is itself compiled out via the same macro.
+          # runtime_client.h already anticipates exactly this case for the one function anything
+          # calls unconditionally (ReportPresentedFrame(), invoked by driver.cpp on every present)
+          # by providing an inline no-op stub in its #else branch -- but runtime_client.cpp's own
+          # real definition of that function isn't itself guarded by #ifdef ENABLE_BACHATA_RUNTIME,
+          # so compiling both the header's stub and the .cpp's real definition into the same binary
+          # is a hard ODR redefinition error. The other three platform/bachata/*.cpp files (audio
+          # transport, controller snapshot, ffmpeg CPU policy) are unconditionally-needed platform
+          # glue and compile clean already, so only this one file is excluded, not the whole
+          # directory.
+          list(FILTER SHADPS4_IOS_SOURCES EXCLUDE REGEX "/src/platform/bachata/runtime_client\\.cpp$")
+
           # trophy_ui.cpp, sdl_window.cpp, settings_dialog_imgui.cpp, and notifications_layer.cpp
           # all do CMRC_DECLARE(res) / cmrc::res::get_filesystem() -- CMakeRC
           # (vector-of-bool/cmrc), a small header-only resource-embedding library that isn't
