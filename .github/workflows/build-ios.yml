@@ -480,6 +480,23 @@ jobs:
               "${IMGUI_RESOURCES_INCLUDE}"
               "${HOST_SHADERS_INCLUDE}"
               "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/sources/fexcore-darwin/FEXCore/include"
+              # FEXCore's own root CMakeLists.txt does include_directories(Source/) and
+              # include_directories("${CMAKE_BINARY_DIR}/Source/") globally for every target in
+              # that project -- Common/Config.h (used by core/fex/fex_guest_engine.cpp) lives
+              # under Source/Common/, not the public FEXCore/include tree above, so the same two
+              # roots need to be on our own path too.
+              "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/sources/fexcore-darwin/Source"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/build/fexcore-ios/Source"
+              # Same situation, one directory tree over: the FEXCore target itself (defined in
+              # FEXCore/Source/CMakeLists.txt) does target_include_directories(FEXCore PRIVATE
+              # ${CMAKE_CURRENT_SOURCE_DIR}/) for ITS OWN sources -- private to that target, not
+              # exported via FEXCore/include/. core/fex/fex_guest_engine.cpp reaches into
+              # FEXCore's internals directly (Interface/Context/Context.h,
+              # Interface/Core/LookupCache.h) for the deep guest-CPU integration this app needs
+              # beyond FEXCore's public API, so it needs the same private root FEXCore's own
+              # sources use.
+              "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/sources/fexcore-darwin/FEXCore/Source"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/build/fexcore-ios/FEXCore/Source"
           )
 
           # FEXCore (Stage 1) is a separate CMake project's build output, not a target visible
