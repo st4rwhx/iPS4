@@ -131,6 +131,20 @@ public:
         return static_tls_size;
     }
 
+    // Count of imported symbols that had a real FEX HLE adapter available but whose veneer
+    // (the small stub the guest's import table is actually wired to) failed to allocate --
+    // e.g. transient StikDebug/dual-mapped-JIT-region exhaustion on iOS. Relocate() does not
+    // fail the whole module load for this (see its own comment at the call site): the
+    // affected import is left unresolved (effectively null) instead, which crashes loudly
+    // the moment the guest calls through it rather than immediately at load time -- but that
+    // deferred crash looks, by itself, identical to a genuine unresolved-symbol/game bug.
+    // Callers that want to distinguish "this game crashed because of resource exhaustion, not
+    // a game-specific bug" (e.g. a crash reporter, or a retry-the-whole-load policy) can check
+    // this after a Relocate() pass.
+    u32 HleVeneerAllocFailureCount() const noexcept {
+        return m_hle_veneer_alloc_failures;
+    }
+
     void RelocateAnyImports(Module* m) {
         std::scoped_lock lk{mutex};
 
@@ -203,6 +217,7 @@ private:
     // dynamic executable-range queries (guest VMM + late HLE veneers).
     FexExecutableQueryContext m_fex_exec_query{};
     std::unique_ptr<Core::GuestCpu::HleVeneerAllocator> m_hle_veneers;
+    u32 m_hle_veneer_alloc_failures = 0; // see HleVeneerAllocFailureCount() above
     std::unique_ptr<Core::GuestCpu::HleGuestBridge> m_fex_bridge;
     std::unique_ptr<Core::FexGuestCpuBackend> m_fex_backend;
     std::mutex m_fex_runtime_mutex;

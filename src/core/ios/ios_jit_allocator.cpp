@@ -200,6 +200,12 @@ DualMappedRegion DualMappedRegion::Allocate(size_t bytes) noexcept {
             "ios_jit_allocator #{}: vm_remap failed for execute-side {} (size={}): "
             "kern_return_t {} ({})",
             request_number, rx, bytes, static_cast<int>(kr), mach_error_string(kr));
+        // rx was already granted by StikDebug (a real BRK-trap round trip, rate-limited --
+        // see the retry loop above) before this local vm_remap was even attempted. Leaving
+        // it mapped-but-unreachable here would leak a scarce, debugger-mediated executable
+        // region on every failure of this kind; vm_deallocate it the same way Release()
+        // below does for the normal teardown path.
+        vm_deallocate(mach_task_self(), reinterpret_cast<vm_address_t>(rx), static_cast<vm_size_t>(bytes));
         return region; // invalid
     }
     kr = vm_protect(mach_task_self(), rw, static_cast<vm_size_t>(bytes), /*set_maximum=*/FALSE,
@@ -210,6 +216,9 @@ DualMappedRegion DualMappedRegion::Allocate(size_t bytes) noexcept {
             "kern_return_t {} ({})",
             request_number, reinterpret_cast<void*>(rw), bytes, static_cast<int>(kr), mach_error_string(kr));
         vm_deallocate(mach_task_self(), rw, static_cast<vm_size_t>(bytes));
+        // Same leaked-executable-region concern as the vm_remap failure branch above --
+        // rx is still a live, StikDebug-granted mapping at this point and must be freed too.
+        vm_deallocate(mach_task_self(), reinterpret_cast<vm_address_t>(rx), static_cast<vm_size_t>(bytes));
         return region; // invalid
     }
 

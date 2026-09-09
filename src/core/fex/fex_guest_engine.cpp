@@ -163,7 +163,22 @@ void SetHgsCheckpoint(HgsCheckpoint value) noexcept {
 // does not claim for anything guest-visible -- checked every case there before picking it, so
 // this cannot collide with a game installing its own handler for a signal number it expects to
 // mean something on real hardware.
+//
+// SIGINFO itself does not exist on Linux/glibc, though -- and this file already has several
+// non-__APPLE__ `#if defined(__aarch64__)` branches elsewhere (e.g. DeliverGuestOrbisSignal's
+// ucontext field access), implying a non-Apple ARM64 host is an anticipated, not purely
+// hypothetical, target for SHADPS4_ENABLE_FEX_GUEST_CPU. An unguarded SIGINFO reference would
+// fail to compile there. SIGRTMIN+N is the portable POSIX-correct equivalent: the guest signal
+// mapping table above only ever maps the standard 1-31 range, never the real-time range, so a
+// reserved RT signal has the same "cannot collide with a game's own handler" property SIGINFO
+// was picked for. +2 (not +0/+1) follows common practice of leaving the first couple of RT
+// signal numbers for the C library/threading implementation's own internal use; POSIX
+// guarantees at least 8 RT signals are available (_POSIX_RTSIG_MAX), so RTMIN+2 is always safe.
+#ifdef __APPLE__
 constexpr int kSafepointSignal = SIGINFO;
+#else
+constexpr int kSafepointSignal = SIGRTMIN + 2;
+#endif
 std::atomic<int> g_safepoint_paused_count {0};
 std::atomic<bool> g_safepoint_resume {false};
 std::atomic<bool> g_safepoint_handler_installed {false};
@@ -1316,6 +1331,11 @@ void FlushPendingGuestOrbisSignal() noexcept {
   }
 }
 
+// Forward-declared: defined below (~100 lines down) alongside its own doc comment
+// explaining why it exists. Needed here because DeliverGuestOrbisSignal runs from
+// async-signal context and must not use std::fprintf/vsnprintf.
+void SignalSafeLog(const char* fmt, ...) noexcept;
+
 bool DeliverGuestOrbisSignal(int orbis_sig, siginfo_t* info, void* rawContext,
                              std::uintptr_t guest_handler) noexcept {
   static_cast<void>(info);
@@ -1360,11 +1380,18 @@ bool DeliverGuestOrbisSignal(int orbis_sig, siginfo_t* info, void* rawContext,
   static_cast<void>(rawContext);
 #endif
 
-  std::fprintf(stderr,
-               "BACHATA_FEX_SIGNAL defer orbis_sig=%d handler=%#lx active=%d host_pc=%#lx host_sp=%#lx in_jit=%d\n",
-               orbis_sig, static_cast<unsigned long>(guest_handler), active ? 1 : 0,
-               static_cast<unsigned long>(host_pc), static_cast<unsigned long>(host_sp),
-               in_jit ? 1 : 0);
+  // Was std::fprintf(stderr, ...) here -- async-signal-unsafe (this function runs from
+  // Libraries::Kernel::SigactionHandler, a raw native signal handler). SignalSafeLog is
+  // the allocation-free, write(2)-based logger this exact codebase already built (see its
+  // definition and doc comment below, ~150 lines down) after diagnosing this precise bug
+  // class in HandleGuestSignal: fprintf's FILE* lock, and even vsnprintf's lazy locale
+  // init, can self-deadlock a thread that was interrupted while already holding malloc's
+  // internal lock -- plausible here since the guest is running JIT'd code that allocates
+  // constantly. This call site predates that fix and was never migrated to it.
+  SignalSafeLog(
+      "BACHATA_FEX_SIGNAL defer orbis_sig=%d handler=%#lx active=%d host_pc=%#lx host_sp=%#lx in_jit=%d\n",
+      orbis_sig, static_cast<unsigned long>(guest_handler), active ? 1 : 0,
+      static_cast<unsigned long>(host_pc), static_cast<unsigned long>(host_sp), in_jit ? 1 : 0);
 
   // Delivery is deferred to a safe HLE boundary. It is never safe to run the
   // guest handler (nested HandleCallback re-enters the JIT) from async-signal
@@ -2432,19 +2459,39 @@ EngineResult<bool> GuestEngine::DestroyThread(Thread*& thread) {
   if (ImplState == nullptr || ImplState->Context == nullptr || thread == nullptr || thread->Native == nullptr) {
     return Failure(EngineStage::Teardown, ESHUTDOWN);
   }
+  // The membership check, the thread->Native capture, and the thread->Native=nullptr +
+  // Threads.erase teardown-start all happen in ONE critical section below -- previously
+  // thread->Native was nulled *outside* any lock, in the gap between two separate
+  // ThreadsMutex acquisitions, while BeginBufferInvalidationSafepoint/OnBufferReusedInPlace
+  // read the same field *under* ThreadsMutex while iterating Threads. That left a window
+  // where Threads still contained this thread (so a concurrent safepoint pass would try to
+  // act on it) while Native had already been unsynchronized-written to nullptr -- a real
+  // data race, however unlikely to be observed on ARM64 in practice.
+  //
+  // Deliberately NOT holding the lock across Syscalls->UnregisterThread/Context->DestroyThread
+  // below: this file has prior, already-fixed history of a genuine deadlock from exactly this
+  // kind of scope-widening (see the AcquireWriteLock/CodeInvalidationMutex circular wait this
+  // codebase hit and fixed elsewhere), and what those two calls acquire internally isn't
+  // something this fix should be guessing at. Instead: erase-then-teardown. The instant
+  // Threads no longer contains this thread AND Native is null (both together, atomically,
+  // under the lock), a concurrent safepoint pass simply never observes it -- there is no
+  // window where it's still "live" from the safepoint's point of view but partially torn
+  // down, regardless of when the actual teardown calls below happen to run.
+  // Named to avoid confusion with Thread::NativeHandle (a std::atomic<pthread_t>, a
+  // different field) -- this is a local copy of Thread::Native (FEXCore::Core::
+  // InternalThreadState*), captured while still holding ThreadsMutex below.
+  decltype(thread->Native) native_thread_state;
   {
     std::scoped_lock lock {ImplState->ThreadsMutex};
     if (!ImplState->Threads.contains(thread) || thread->Owner != std::this_thread::get_id()) {
       return Failure(EngineStage::Thread, EPERM);
     }
-  }
-  ImplState->Syscalls->UnregisterThread(thread->Native);
-  ImplState->Context->DestroyThread(thread->Native);
-  thread->Native = nullptr;
-  {
-    std::scoped_lock lock {ImplState->ThreadsMutex};
+    native_thread_state = thread->Native;
+    thread->Native = nullptr;
     ImplState->Threads.erase(thread);
   }
+  ImplState->Syscalls->UnregisterThread(native_thread_state);
+  ImplState->Context->DestroyThread(native_thread_state);
   delete thread;
   thread = nullptr;
   return true;

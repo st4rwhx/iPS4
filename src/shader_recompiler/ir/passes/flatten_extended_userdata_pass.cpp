@@ -599,8 +599,18 @@ PFN_SrtWalker RegisterWalkerCode(const u8* ptr, size_t size) {
     std::lock_guard lock{g_srt_code_mutex};
     const size_t range_index = g_srt_code_range_count.load(std::memory_order_relaxed);
     if (range_index >= g_srt_code_ranges.size()) {
-        LOG_CRITICAL(Render_Recompiler, "ARM64 SRT walker range table is full");
-        std::abort();
+        // Was std::abort() -- but this function's caller (GenerateSrtProgram) and ITS
+        // caller's caller (info.h's `if (srt_info.walker_func) { ... }`) already treat a
+        // nullptr return as a normal, tolerated outcome (see the early `return nullptr`
+        // just above for the IsArm64SrtWalker-mismatch case, and the StikDebug-failure
+        // returns below -- this makes all of this function's failure paths consistent).
+        // The one shader that needed this walker keeps whatever flattened SRT buffer
+        // contents it already had rather than the correctly-flattened one -- a localized
+        // rendering-correctness issue for that shader, not a process-ending one.
+        LOG_CRITICAL(Render_Recompiler,
+                    "ARM64 SRT walker range table is full; this shader's SRT walker will be "
+                    "skipped rather than aborting the process");
+        return nullptr;
     }
 
     std::unique_ptr<SrtCodeMapping> mapping;
@@ -620,10 +630,23 @@ PFN_SrtWalker RegisterWalkerCode(const u8* ptr, size_t size) {
         // everywhere.
         mapping->region = Core::DualMappedRegion::Allocate(size);
         if (!mapping->region.IsValid()) {
+            // Was std::abort() here (P0.3 in the stability audit). This file's own comment
+            // block above (IosSrtCodePool) documents that this exact failure -- StikDebug
+            // killed mid-session by iOS's background wake-rate limiter -- has already been
+            // observed on-device, i.e. this is not a hypothetical. HleVeneerAllocator::Allocate
+            // (hle_call_adapter.cpp) already treats the identical DualMappedRegion::Allocate
+            // failure as recoverable (returns ENOMEM rather than aborting); this call site
+            // gets the same contract now. The caller (GenerateSrtProgram) and its own caller's
+            // consumer (info.h's `if (srt_info.walker_func) { ... }`) already tolerate a
+            // nullptr walker -- the one shader that needed this walker keeps whatever
+            // flattened SRT buffer it already had instead of the freshly-flattened one, a
+            // localized rendering-correctness issue rather than the whole process aborting
+            // over a transient StikDebug hiccup.
             LOG_CRITICAL(Render_Recompiler,
                         "Unable to allocate ARM64 SRT walker (iOS dual-mapped JIT, pool "
-                        "exhausted or never initialized)");
-            std::abort();
+                        "exhausted or StikDebug unresponsive); skipping this shader's SRT "
+                        "walker instead of aborting the process");
+            return nullptr;
         }
         rw_addr = mapping->region.rw_addr;
         rx_addr = mapping->region.rx_addr;
@@ -728,8 +751,26 @@ void GenerateSrtProgram(Info& info, PassInfo& pass_info) {
     emitter.End();
 
     info.srt_info.walker_func = RegisterWalkerCode(emitter.Data(), emitter.Size());
-    ASSERT(info.srt_info.walker_func != nullptr);
-    info.srt_info.walker_func_size = emitter.Size();
+    // Not an ASSERT: RegisterWalkerCode now returns nullptr, deliberately, on several
+    // recoverable resource-exhaustion failures (see its own call sites -- part of the P0.3
+    // stability fix) instead of aborting the process. The actual consumer of walker_func
+    // (info.h: `if (srt_info.walker_func) { ... }`) already treats a null walker as "skip
+    // it" rather than assuming it's always callable, so there is nothing left for this
+    // function to enforce here -- asserting would just turn a recoverable, already-logged
+    // failure back into a hard crash one call frame up.
+    if (info.srt_info.walker_func == nullptr) {
+        LOG_WARNING(Render_Recompiler,
+                    "GenerateSrtProgram: no SRT walker registered for this shader; its "
+                    "flattened user-data buffer will not be refreshed this call");
+        // Deliberately leave walker_func_size at its default (0), not emitter.Size(): the
+        // pipeline-cache serialization path (vk_pipeline_serialization.cpp) guards on
+        // `if (walker_func_size)` before dereferencing walker_func to write it out. Setting
+        // a non-zero size here with a null walker_func would make that unrelated code path
+        // read from address 0 -- worth avoiding here rather than requiring every current and
+        // future walker_func_size consumer to *also* separately null-check walker_func.
+    } else {
+        info.srt_info.walker_func_size = emitter.Size();
+    }
     info.srt_info.flattened_bufsize_dw = pass_info.dst_off_dw;
 }
 

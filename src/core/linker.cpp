@@ -835,8 +835,19 @@ void Linker::Relocate(Module* module) {
                 }
                 const auto veneer = m_hle_veneers->Allocate(*symrec.hle_adapter);
                 if (const auto* failure = std::get_if<GuestCpu::HleVeneerFailure>(&veneer)) {
-                    LOG_ERROR(Core_Linker, "Unable to allocate FEX HLE veneer for {}: {}", symrec.name,
-                              failure->error);
+                    // symbol_virtual_addr stays 0 -- this import is left unresolved, exactly
+                    // like a symbol Resolve() itself couldn't find. It will crash loudly (a
+                    // near-null call target) the moment the guest calls through it, but not
+                    // now, and that later crash carries no link back to this specific cause
+                    // by itself. m_hle_veneer_alloc_failures (see linker.h) is the hook for a
+                    // caller to tell "resource exhaustion during load" apart from "genuine
+                    // unresolved symbol" after the fact -- bump it here so that hook is real.
+                    ++m_hle_veneer_alloc_failures;
+                    LOG_ERROR(Core_Linker,
+                              "Unable to allocate FEX HLE veneer for {}: {} -- import left "
+                              "unresolved; expect a null-call crash the first time the guest "
+                              "invokes it, not now",
+                              symrec.name, failure->error);
                 } else {
                     symbol_virtual_addr = std::get<u64>(veneer);
                 }
