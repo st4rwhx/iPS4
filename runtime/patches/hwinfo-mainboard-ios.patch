@@ -1,0 +1,43 @@
+diff --git a/src/apple/mainboard.cpp b/src/apple/mainboard.cpp
+index b534dba..cf9c37c 100644
+--- a/src/apple/mainboard.cpp
++++ b/src/apple/mainboard.cpp
+@@ -5,6 +5,31 @@
+ 
+ #ifdef HWINFO_APPLE
+ 
++#include <TargetConditionals.h>
++
++#if TARGET_OS_IPHONE
++// kIOMasterPortDefault (the global "root" IOKit connection this file's platform-expert lookup
++// needs) is explicitly marked unavailable on iOS by IOKitLib.h itself -- confirmed by a hard
++// compile error building this for AetherPS4-iOS, not just a missing header this time (IOKitLib.h
++// itself exists on iOS, unlike battery.cpp's IOKit/ps/* or disk.cpp's IOKit/storage/IOMedia.h).
++// There's no sandboxed-app-reachable equivalent of "IOPlatformExpertDevice" registry lookup on
++// iOS. Stub with the same "<unknown>" fallback the real Apple implementation below already uses
++// for every other MainBoard field regardless of platform.
++#include "hwinfo/mainboard.h"
++
++namespace hwinfo {
++
++MainBoard::MainBoard() {
++  _vendor = "<unknown>";
++  _name = "<unknown>";
++  _version = "<unknown>";
++  _serialNumber = "<unknown>";
++}
++
++}  // namespace hwinfo
++
++#else  // TARGET_OS_IPHONE
++
+ #include <IOKit/IOKitLib.h>
+ 
+ #include "hwinfo/mainboard.h"
+@@ -55,4 +80,6 @@ MainBoard::MainBoard() {
+ 
+ }  // namespace hwinfo
+ 
++#endif  // TARGET_OS_IPHONE
++
+ #endif  // HWINFO_APPLE

@@ -158,6 +158,29 @@ jobs:
             exit 1
           fi
 
+      # Attempt 9 resolved the ambiguity flagged in that commit: mainboard.cpp DOES fail to
+      # compile on iOS -- confirmed by direct read of spike-externals-build.log -- just with a
+      # different error shape than battery/disk's "file not found": IOKitLib.h itself exists on
+      # iOS, but kIOMasterPortDefault is explicitly marked unavailable there ("'kIOMasterPortDefault'
+      # is unavailable: not available on iOS"), a hard compile error, not a silent runtime no-op.
+      # disk.cpp's patch worked cleanly in the same run (zero errors from it). Same fix shape as
+      # the other two: there's no sandboxed-app-reachable equivalent of the
+      # "IOPlatformExpertDevice" registry lookup this file needs, so the iOS stub returns
+      # "<unknown>" for the serial number too, matching the three fields this file's own real
+      # Apple implementation already hardcodes to "<unknown>" regardless of platform.
+      - name: Patch hwinfo mainboard module for iOS (kIOMasterPortDefault unavailable)
+        run: |
+          set -x
+          patch_path="$PWD/runtime/patches/hwinfo-mainboard-ios.patch"
+          if git -C externals/hwinfo apply --check "$patch_path" 2>/dev/null; then
+            git -C externals/hwinfo apply "$patch_path"
+          elif git -C externals/hwinfo apply --reverse --check "$patch_path" 2>/dev/null; then
+            echo "hwinfo mainboard iOS patch already applied, skipping"
+          else
+            echo "::error::hwinfo mainboard iOS patch does not apply cleanly"
+            exit 1
+          fi
+
       - name: Show runner environment
         run: |
           sw_vers || true
