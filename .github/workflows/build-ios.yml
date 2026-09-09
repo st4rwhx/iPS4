@@ -188,6 +188,8 @@ jobs:
             -DCMAKE_OSX_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+            -DALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO_EXITCODE=1 \
+            -DALLOWS_ONESHOT_TIMERS_WITH_TIMEOUT_ZERO_EXITCODE__TRYRUN_OUTPUT= \
             2>&1 | tee spike-externals-configure.log
           exit "${PIPESTATUS[0]}"
 
