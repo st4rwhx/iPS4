@@ -19,6 +19,12 @@
 #include "core/tls.h"
 #include "cpu_patches.h"
 
+// This entire file patches raw x86 machine code in place (via Xbyak/Zydis) -- meaningless
+// unless guest x86 code actually executes directly on host x86-64 silicon, which never
+// happens under FEX's ARM64-targeting JIT. module.cpp's own two call sites into this file
+// already guard themselves with #ifdef ARCH_X86_64, matching cpu_patches.h's own guard.
+#ifdef ARCH_X86_64
+
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -891,3 +897,5 @@ void PrePatchInstructions(u64 segment_addr, u64 segment_size) {
 }
 
 } // namespace Core
+
+#endif // ARCH_X86_64

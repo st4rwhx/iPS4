@@ -3,7 +3,14 @@
 
 #pragma once
 
+#include "common/arch.h"
 #include "common/types.h"
+
+// module.cpp's own two call sites (RegisterPatchModule, PrePatchInstructions) already guard
+// themselves with #ifdef ARCH_X86_64 -- this header just needs the same guard, since these
+// functions patch raw x86 machine code in place and have no meaning when guest x86 code never
+// executes directly on host silicon (e.g. under FEX's ARM64-targeting JIT).
+#ifdef ARCH_X86_64
 
 namespace Core {
 
@@ -15,3 +22,5 @@ void RegisterPatchModule(void* module_ptr, u64 module_size, void* trampoline_are
 void PrePatchInstructions(u64 segment_addr, u64 segment_size);
 
 } // namespace Core
+
+#endif // ARCH_X86_64
