@@ -510,6 +510,12 @@ jobs:
               miniupnpc::miniupnpc
               hwinfo_battery hwinfo_cpu hwinfo_disk hwinfo_gpu hwinfo_mainboard
               hwinfo_network hwinfo_os hwinfo_ram
+              nlohmann_json::nlohmann_json
+              RenderDoc::API
+              half::half
+              stb::headers
+              minimp3
+              Cpp_Httplib
           )
           EOF
 
