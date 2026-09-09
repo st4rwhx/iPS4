@@ -486,6 +486,13 @@ jobs:
           target_compile_definitions(shadps4_ios PRIVATE ARCHITECTURE_arm64=1)
           target_include_directories(shadps4_ios PUBLIC
               "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+              # A handful of files use paths relative to the repo ROOT rather than src/ or
+              # externals/ (confirmed by direct grep across the whole tree):
+              # core/libraries/ajm/ajm_aac.cpp includes "externals/aacdec/...", core/ipc/ipc.cpp
+              # includes "src/core/libraries/usbd/usbd.h", shader_recompiler/ir/debug_print.h
+              # includes "src/common/types.h" -- all resolve correctly once the repo root itself
+              # is on the include path.
+              "${CMAKE_CURRENT_SOURCE_DIR}/.."
               "${IMGUI_RESOURCES_INCLUDE}"
               "${HOST_SHADERS_INCLUDE}"
               "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/sources/fexcore-darwin/FEXCore/include"
