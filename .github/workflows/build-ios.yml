@@ -475,6 +475,15 @@ jobs:
           # guest-CPU integration entirely (confirmed by direct read -- every one of those
           # files gates real functionality behind #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU).
           target_compile_definitions(shadps4_ios PRIVATE SHADPS4_ENABLE_FEX_GUEST_CPU)
+          # FEXCore's own top-level CMakeLists.txt does add_compile_definitions(ARCHITECTURE_arm64=1)
+          # globally for its whole project when targeting arm64 (ARCHITECTURE_x86_64=1 on x86-64) --
+          # its own public headers (e.g. FEXCore/Utils/SHMStats.h, confirmed by direct read) use this
+          # exact macro, not a standard compiler-predefined one like __aarch64__, to pick real ARM64
+          # code paths vs x86-64-only ones (__rdtscp and friends). Same "separate CMake project, no
+          # definition propagation" situation as every FEXCore-internal include path added above --
+          # without this, FEXCore's own headers silently fall through to their x86-64 branch even
+          # though we're building for arm64.
+          target_compile_definitions(shadps4_ios PRIVATE ARCHITECTURE_arm64=1)
           target_include_directories(shadps4_ios PUBLIC
               "${CMAKE_CURRENT_SOURCE_DIR}/../src"
               "${IMGUI_RESOURCES_INCLUDE}"
