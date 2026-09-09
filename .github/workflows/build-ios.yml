@@ -387,6 +387,152 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           find runtime/build/shadps4-ios/externals -name "*.a" 2>/dev/null | sort | tee spike-externals-libs.txt
 
+      # ==============================================================
+      # STAGE 3: shadps4_ios itself, globbed from src/ -- confirmed (see this
+      # workflow's history and the upstream maintainer's own confirmation) that
+      # there is no public "real" root CMakeLists.txt with a curated source-file
+      # list to restore; globbing is the only way to get a from-source build out
+      # of this public repo. Two things need solving before the glob itself:
+      #
+      #   1. src/imgui/renderer has its own real CMakeLists.txt (ImGui_Resources)
+      #      that embeds font files into C++ source via a HOST-native helper
+      #      executable run *during* the build (Dear_ImGui_FontEmbed) -- can't
+      #      execute an iOS binary on the CI host, so that helper has to be built
+      #      natively (no cross-compile flags) in a separate pass first.
+      #   2. src/video_core/host_shaders has its own real CMakeLists.txt
+      #      (host_shaders) that generates C++ headers from GLSL shader source via
+      #      a plain `cmake -P` script (StringShaderHeader.cmake) -- no execution
+      #      of target-arch code involved, so this one is already cross-compile-
+      #      safe as-is, just needs add_subdirectory()'d like ImGui_Resources.
+      #
+      # Everything else under src/ is flat-globbed. src/platform/bachata was
+      # wrongly assumed Android-only in this workflow's original header comment
+      # (corrected after actually reading it: it's POSIX Unix-domain-socket IPC,
+      # no Android/JNI code at all, and main.cpp uses it unconditionally with no
+      # platform guard) -- it stays in the glob.
+      # ==============================================================
+      - name: Build host tool Dear_ImGui_FontEmbed (native, not cross-compiled)
+        id: fontembedbuild
+        continue-on-error: true
+        run: |
+          set -x
+          mkdir -p runtime/build/host-tools
+          clang++ -O2 -std=c++17 \
+            externals/dear_imgui/misc/fonts/binary_to_compressed_c.cpp \
+            -o runtime/build/host-tools/Dear_ImGui_FontEmbed \
+            2>&1 | tee spike-fontembed-build.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Add shadps4_ios target to wrapper
+        if: steps.fontembedbuild.outcome == 'success' && steps.extconfigure.outcome == 'success'
+        run: |
+          cat >> spike-wrapper/CMakeLists.txt << 'EOF'
+
+          set(IMGUI_FONT_EMBED_EXECUTABLE
+              "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/build/host-tools/Dear_ImGui_FontEmbed"
+              CACHE FILEPATH "" FORCE)
+          add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../src/imgui/renderer" imgui-renderer-build)
+          add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../src/video_core/host_shaders" host-shaders-build)
+
+          # src/imgui/renderer/ holds both real, hand-written source (font_data.cpp,
+          # texture_manager.cpp, imgui_core.cpp, imgui_impl_sdl3.cpp, imgui_impl_vulkan.cpp,
+          # font_stack.cpp -- confirmed by directory listing) AND its own CMakeLists.txt
+          # (ImGui_Resources, added above) that builds ONLY the generated font-embed .cpp files
+          # into ${CMAKE_CURRENT_BINARY_DIR}/generated_fonts -- the BUILD tree, not the source
+          # tree, so this source-tree glob never sees them and needs no exclusion for that
+          # directory: the hand-written files here are genuinely meant to compile straight into
+          # shadps4_ios like everything else under src/.
+          file(GLOB_RECURSE SHADPS4_IOS_SOURCES CONFIGURE_DEPENDS
+               "${CMAKE_CURRENT_SOURCE_DIR}/../src/*.cpp"
+               "${CMAKE_CURRENT_SOURCE_DIR}/../src/*.mm")
+
+          add_library(shadps4_ios STATIC ${SHADPS4_IOS_SOURCES})
+          add_dependencies(shadps4_ios host_shaders)
+          target_compile_features(shadps4_ios PUBLIC cxx_std_23)
+          # This app's entire premise is the FEX-based x86-64 guest CPU bridge; without this
+          # define, src/core/fex, src/core/linker.h, src/main.cpp, and others compile out the
+          # guest-CPU integration entirely (confirmed by direct read -- every one of those
+          # files gates real functionality behind #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU).
+          target_compile_definitions(shadps4_ios PRIVATE SHADPS4_ENABLE_FEX_GUEST_CPU)
+          target_include_directories(shadps4_ios PUBLIC
+              "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+              "${IMGUI_RESOURCES_INCLUDE}"
+              "${HOST_SHADERS_INCLUDE}"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/sources/fexcore-darwin/FEXCore/include"
+          )
+
+          # FEXCore (Stage 1) is a separate CMake project's build output, not a target visible
+          # in this project -- linked here by direct .a path. Deliberately excludes FEXCore's
+          # own External/fmt and External/xxhash copies: externals/ (Stage 2) already provides
+          # fmt::fmt and xxHash::xxhash, and linking both copies would duplicate-symbol at link
+          # time.
+          set(FEXCORE_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/build/fexcore-ios")
+          target_link_libraries(shadps4_ios PUBLIC
+              "${FEXCORE_BUILD_DIR}/FEXCore/Source/libFEXCore.a"
+              "${FEXCORE_BUILD_DIR}/FEXCore/Source/libFEXCore_Base.a"
+              "${FEXCORE_BUILD_DIR}/FEXCore/Source/libJemallocLibs.a"
+              "${FEXCORE_BUILD_DIR}/Source/Common/libCommon.a"
+              "${FEXCORE_BUILD_DIR}/Source/Tools/CommonTools/libCommonTools.a"
+              "${FEXCORE_BUILD_DIR}/Source/Common/cpp-optparse/libcpp-optparse.a"
+              "${FEXCORE_BUILD_DIR}/External/rpmalloc/librpmalloc.a"
+              "${FEXCORE_BUILD_DIR}/External/cephes/libcephes_128bit.a"
+              "${FEXCORE_BUILD_DIR}/External/SoftFloat-3e/libsoftfloat_3e.a"
+              "${FEXCORE_BUILD_DIR}/External/tiny-json/libtiny-json.a"
+          )
+
+          # externals/ (Stage 2) targets -- every name below confirmed by direct read of the
+          # relevant submodule's own CMakeLists.txt (not guessed from .a filenames, which can
+          # differ from the real CMake target name -- e.g. pugixml's real static target is
+          # "pugixml-static"/"pugixml::static", not the INTERFACE target "pugixml").
+          target_link_libraries(shadps4_ios PUBLIC
+              ImGui_Resources
+              fmt::fmt
+              ZLIB::ZLIB
+              Freetype::Freetype
+              FFmpeg::ffmpeg
+              PNG::PNG
+              xxHash::xxhash
+              miniz::miniz
+              spdlog::spdlog
+              SDL3::SDL3
+              glslang SPIRV GenericCodeGen MachineIndependent OSDependent glslang-default-resource-limits
+              Zydis::Zydis
+              Zycore::Zycore
+              OpenAL::OpenAL
+              pugixml::static
+              crypto ssl tls
+              date::date-tz
+              LibAtrac9
+              sirit
+              TracyClient
+              Dear_ImGui
+              ImGuiFileDialog
+              miniupnpc::miniupnpc
+              hwinfo_battery hwinfo_cpu hwinfo_disk hwinfo_gpu hwinfo_mainboard
+              hwinfo_network hwinfo_os hwinfo_ram
+          )
+          EOF
+
+      - name: Build shadps4_ios (Stage 3)
+        id: shadps4iosbuild
+        if: steps.fontembedbuild.outcome == 'success' && steps.extconfigure.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -x
+          cmake --build runtime/build/shadps4-ios/externals --target shadps4_ios \
+            --parallel "$(sysctl -n hw.ncpu)" 2>&1 | tee spike-shadps4ios-build.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Summarize shadps4_ios stage
+        if: always()
+        run: |
+          echo "### shadps4_ios" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -30 spike-fontembed-build.log 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || true
+          grep -iE "error:|FAILED" spike-shadps4ios-build.log 2>/dev/null | head -150 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          find runtime/build/shadps4-ios/externals -name "libshadps4_ios.a" 2>/dev/null | tee spike-shadps4ios-libs.txt
+
       - name: Upload ALL spike logs (always)
         if: always()
         uses: actions/upload-artifact@v4
