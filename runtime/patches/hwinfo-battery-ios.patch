@@ -1,0 +1,50 @@
+diff --git a/src/apple/battery.cpp b/src/apple/battery.cpp
+index 1596259..daef10f 100644
+--- a/src/apple/battery.cpp
++++ b/src/apple/battery.cpp
+@@ -5,6 +5,35 @@
+ 
+ #ifdef HWINFO_APPLE
+ 
++#include <TargetConditionals.h>
++
++#if TARGET_OS_IPHONE
++// IOKit's Power Source API (IOKit/ps/IOPSKeys.h, IOKit/ps/IOPowerSources.h) is macOS-only --
++// confirmed by a hard "file not found" compile error building this for AetherPS4-iOS, not
++// something guarded by HWINFO_APPLE itself (that macro fires for iOS too, since Apple's
++// toolchain still defines __APPLE__ there). There's no public C/C++-level replacement on iOS
++// (battery info lives behind UIKit's UIDevice, Objective-C only, out of scope for this static
++// lib); stub out with the same "<unknown>"/0 fallback this file's own real implementation
++// already returns below whenever a given field genuinely isn't available.
++#include "hwinfo/battery.h"
++
++namespace hwinfo {
++
++std::string Battery::getVendor() const { return "<unknown>"; }
++std::string Battery::getModel() const { return "<unknown>"; }
++std::string Battery::getSerialNumber() const { return "<unknown>"; }
++std::string Battery::getTechnology() const { return "<unknown>"; }
++uint32_t Battery::getEnergyFull() const { return 0; }
++uint32_t Battery::energyNow() const { return 0; }
++bool Battery::charging() const { return false; }
++bool Battery::discharging() const { return false; }
++
++std::vector<Battery> getAllBatteries() { return {}; }
++
++}  // namespace hwinfo
++
++#else  // TARGET_OS_IPHONE
++
+ #include <CoreFoundation/CoreFoundation.h>
+ #include <IOKit/ps/IOPSKeys.h>
+ #include <IOKit/ps/IOPowerSources.h>
+@@ -162,4 +191,6 @@ std::vector<Battery> getAllBatteries() {
+ 
+ }  // namespace hwinfo
+ 
+-#endif
+\ No newline at end of file
++#endif  // TARGET_OS_IPHONE
++
++#endif  // HWINFO_APPLE
+\ No newline at end of file

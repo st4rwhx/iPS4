@@ -113,6 +113,30 @@ jobs:
             exit 1
           fi
 
+      # Same situation, same fix pattern, one error later: attempt 7's build log
+      # (spike-externals-build.log) shows the build reached 82% (1100/1347 steps) past the
+      # ImGuiFileDialog fix before hwinfo_battery's apple/battery.cpp hit
+      # "fatal error: 'IOKit/ps/IOPSKeys.h' file not found" -- confirmed root cause by reading
+      # externals/hwinfo/include/hwinfo/platform.h: HWINFO_APPLE is defined for any __APPLE__
+      # target, which fires for iOS too (Apple's toolchain still sets __APPLE__ there), but
+      # IOKit's Power Source API is genuinely macOS-only. libhwinfo_battery.a (like the other
+      # hwinfo_* libs) is a real dependency confirmed in AetherPS4-iOS.xcodeproj's own library
+      # list, so it can't just be skipped. externals/hwinfo tracks shadps4-emu/ext-hwinfo,
+      # another repo we don't have push access to -- same patch-file approach as
+      # ImGuiFileDialog above.
+      - name: Patch hwinfo battery module for iOS (no macOS-only IOKit power API)
+        run: |
+          set -x
+          patch_path="$PWD/runtime/patches/hwinfo-battery-ios.patch"
+          if git -C externals/hwinfo apply --check "$patch_path" 2>/dev/null; then
+            git -C externals/hwinfo apply "$patch_path"
+          elif git -C externals/hwinfo apply --reverse --check "$patch_path" 2>/dev/null; then
+            echo "hwinfo battery iOS patch already applied, skipping"
+          else
+            echo "::error::hwinfo battery iOS patch does not apply cleanly"
+            exit 1
+          fi
+
       - name: Show runner environment
         run: |
           sw_vers || true
