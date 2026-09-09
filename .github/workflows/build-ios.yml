@@ -516,6 +516,17 @@ jobs:
               stb::headers
               minimp3
               Cpp_Httplib
+              toml11::toml11
+              Boost::headers
+              Vulkan::Headers
+              GPUOpen::VulkanMemoryAllocator
+              tsl::robin_map
+              xbyak::xbyak
+              magic_enum::magic_enum
+              epoll-shim
+              fdk-aac
+              CLI11::CLI11
+              gcn
           )
           EOF
 
