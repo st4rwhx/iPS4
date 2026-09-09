@@ -479,6 +479,50 @@ jobs:
           # outright rather than just defining the macro.
           list(FILTER SHADPS4_IOS_SOURCES EXCLUDE REGEX "/src/core/libraries/usbd/")
 
+          # trophy_ui.cpp, sdl_window.cpp, settings_dialog_imgui.cpp, and notifications_layer.cpp
+          # all do CMRC_DECLARE(res) / cmrc::res::get_filesystem() -- CMakeRC
+          # (vector-of-bool/cmrc), a small header-only resource-embedding library that isn't
+          # vendored anywhere in this repo (confirmed: no submodule, no externals/ entry, no
+          # CMakeLists.txt reference at all) -- this is very likely the "embedded-resources"
+          # library the upstream maintainer's own Claude flagged as having no public source.
+          # Unlike that dead end, this one is fully reconstructable: every resource.open(...)
+          # call site across all four files was grepped for its literal path (including the two
+          # that build the path dynamically -- settings_dialog_imgui.cpp's loadTexture lambda and
+          # notifications_layer.cpp's iconMap), and every single one resolves to a file that
+          # already exists in src/resources/ at that exact path. Fetching CMakeRC itself (a
+          # small, stable, MIT-licensed, single-file CMake module) via FetchContent -- the same
+          # pattern externals/CMakeLists.txt already uses successfully for zlib -- and using its
+          # own cmrc_add_resource_library() to embed exactly those 14 files, WHENCE-rooted at the
+          # repo root so the embedded paths match "src/resources/..." exactly as the source
+          # expects.
+          include(FetchContent)
+          FetchContent_Declare(cmrc
+              GIT_REPOSITORY https://github.com/vector-of-bool/cmrc.git
+              GIT_TAG 2.0.1
+          )
+          FetchContent_Populate(cmrc)
+          include("${cmrc_SOURCE_DIR}/CMakeRC.cmake")
+
+          set(SHADPS4_IOS_RESOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../src/resources")
+          cmrc_add_resource_library(res
+              ALIAS cmrc::res
+              WHENCE "${CMAKE_CURRENT_SOURCE_DIR}/.."
+              "${SHADPS4_IOS_RESOURCE_ROOT}/shadps4.png"
+              "${SHADPS4_IOS_RESOURCE_ROOT}/trophy.wav"
+              "${SHADPS4_IOS_RESOURCE_ROOT}/platinum.png"
+              "${SHADPS4_IOS_RESOURCE_ROOT}/gold.png"
+              "${SHADPS4_IOS_RESOURCE_ROOT}/silver.png"
+              "${SHADPS4_IOS_RESOURCE_ROOT}/bronze.png"
+              "${SHADPS4_IOS_RESOURCE_ROOT}/big_picture/settings.png"
+              "${SHADPS4_IOS_RESOURCE_ROOT}/big_picture/experimental.png"
+              "${SHADPS4_IOS_RESOURCE_ROOT}/big_picture/graphics.png"
+              "${SHADPS4_IOS_RESOURCE_ROOT}/big_picture/controller.png"
+              "${SHADPS4_IOS_RESOURCE_ROOT}/big_picture/trophy.png"
+              "${SHADPS4_IOS_RESOURCE_ROOT}/big_picture/log.png"
+              "${SHADPS4_IOS_RESOURCE_ROOT}/big_picture/folder.png"
+              "${SHADPS4_IOS_RESOURCE_ROOT}/big_picture/profiles.png"
+          )
+
           add_library(shadps4_ios STATIC ${SHADPS4_IOS_SOURCES})
           add_dependencies(shadps4_ios host_shaders)
           target_compile_features(shadps4_ios PUBLIC cxx_std_23)
@@ -570,6 +614,7 @@ jobs:
           # "pugixml-static"/"pugixml::static", not the INTERFACE target "pugixml").
           target_link_libraries(shadps4_ios PUBLIC
               ImGui_Resources
+              cmrc::res
               fmt::fmt
               ZLIB::ZLIB
               Freetype::Freetype
