@@ -113,6 +113,27 @@ jobs:
             exit 1
           fi
 
+      # Self-inflicted, found by attempt 17's own build log: wiring IMGUI_USER_CONFIG into
+      # Dear_ImGui (to fix real ABI issues, see the shadps4_ios patch history) means imgui.h no
+      # longer defines its own IM_ASSERT, so it also stops transitively #include'ing <cassert>
+      # on ImGuiFileDialog.cpp's behalf -- and this file uses the raw assert() macro directly
+      # without including <cassert> itself. Confirmed via direct build log read ("use of
+      # undeclared identifier 'assert'") and confirmed no other externals/ or src/ file has the
+      # same latent gap (grepped every file that includes imgui.h for bare assert() calls
+      # without their own <cassert>/<assert.h>).
+      - name: Patch ImGuiFileDialog for missing <cassert> (IMGUI_USER_CONFIG side effect)
+        run: |
+          set -x
+          patch_path="$PWD/runtime/patches/imguifiledialog-cassert.patch"
+          if git -C externals/ImGuiFileDialog apply --check "$patch_path" 2>/dev/null; then
+            git -C externals/ImGuiFileDialog apply "$patch_path"
+          elif git -C externals/ImGuiFileDialog apply --reverse --check "$patch_path" 2>/dev/null; then
+            echo "ImGuiFileDialog cassert patch already applied, skipping"
+          else
+            echo "::error::ImGuiFileDialog cassert patch does not apply cleanly"
+            exit 1
+          fi
+
       # Same situation, same fix pattern, one error later: attempt 7's build log
       # (spike-externals-build.log) shows the build reached 82% (1100/1347 steps) past the
       # ImGuiFileDialog fix before hwinfo_battery's apple/battery.cpp hit

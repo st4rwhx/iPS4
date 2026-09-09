@@ -1,0 +1,12 @@
+diff --git a/ImGuiFileDialog.cpp b/ImGuiFileDialog.cpp
+index 6658912..84d9d20 100644
+--- a/ImGuiFileDialog.cpp
++++ b/ImGuiFileDialog.cpp
+@@ -39,6 +39,7 @@ SOFTWARE.
+ 
+ #pragma region Includes
+ 
++#include <cassert>
+ #include <cfloat>
+ #include <cstring>  // stricmp / strcasecmp
+ #include <cstdarg>  // variadic
