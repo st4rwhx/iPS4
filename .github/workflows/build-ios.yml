@@ -92,6 +92,27 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
+      # ImGuiFileDialog is submoduled from shadexternals/ImGuiFileDialog, which we don't have
+      # push access to, so the fix can't live as a submodule commit -- same situation as SDL3's
+      # Winlator patch (runtime/patches/sdl3-winlator-x11.patch, applied the identical way by
+      # runtime/scripts/build-shadps4-arm64.sh) and FEXCore's fex-fexcore-only.patch. Confirmed
+      # by attempt 6's actual build log (spike-externals-build.log): CreateDirectoryIfNotExist's
+      # _IGFD_UNIX_ branch calls std::system("mkdir -p ..."), which Xcode's iphoneos SDK marks
+      # explicitly unavailable (iOS is sandboxed, no process spawning) -- a hard compile error,
+      # not a warning, so externals/ can never fully build for iOS without this.
+      - name: Patch ImGuiFileDialog for iOS (no std::system)
+        run: |
+          set -x
+          patch_path="$PWD/runtime/patches/imguifiledialog-ios-mkdir.patch"
+          if git -C externals/ImGuiFileDialog apply --check "$patch_path" 2>/dev/null; then
+            git -C externals/ImGuiFileDialog apply "$patch_path"
+          elif git -C externals/ImGuiFileDialog apply --reverse --check "$patch_path" 2>/dev/null; then
+            echo "ImGuiFileDialog iOS patch already applied, skipping"
+          else
+            echo "::error::ImGuiFileDialog iOS patch does not apply cleanly"
+            exit 1
+          fi
+
       - name: Show runner environment
         run: |
           sw_vers || true

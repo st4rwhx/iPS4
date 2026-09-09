@@ -1,0 +1,48 @@
+diff --git a/ImGuiFileDialog.cpp b/ImGuiFileDialog.cpp
+index 6658912..899c70d 100644
+--- a/ImGuiFileDialog.cpp
++++ b/ImGuiFileDialog.cpp
+@@ -457,12 +457,15 @@ public:
+                 emscripten_run_script(str.c_str());
+                 res = true;
+ #elif defined(_IGFD_UNIX_)
+-                char buffer[PATH_MAX] = {};
+-                snprintf(buffer, PATH_MAX, "mkdir -p \"%s\"", vName.c_str());
+-                const int dir_err = std::system(buffer);
+-                if (dir_err != -1) {
+-                    res = true;
+-                }
++                // Was std::system("mkdir -p ...") -- unavailable on iOS (sandboxed, no process
++                // spawning; Xcode's iphoneos SDK marks system() explicitly unavailable there,
++                // which fails this file's build for the AetherPS4-iOS target) and, independent
++                // of that, a shell-injection-shaped pattern (vName interpolated unescaped into a
++                // shell command). std::filesystem::create_directories is the portable stdlib
++                // equivalent of "mkdir -p" -- no shell, no platform-specific code needed.
++                namespace fs = std::filesystem;
++                std::error_code ec;
++                res = fs::create_directories(fs::path(vName), ec) && !ec;
+ #endif  // _IGFD_WIN_
+                 if (!res) {
+                     std::cout << "Error creating directory " << vName << std::endl;
+@@ -611,12 +614,15 @@ public:
+                 emscripten_run_script(str.c_str());
+                 res = true;
+ #elif defined(_IGFD_UNIX_)
+-                char buffer[PATH_MAX] = {};
+-                snprintf(buffer, PATH_MAX, "mkdir -p \"%s\"", vName.c_str());
+-                const int dir_err = std::system(buffer);
+-                if (dir_err != -1) {
+-                    res = true;
+-                }
++                // Was std::system("mkdir -p ...") -- unavailable on iOS (sandboxed, no process
++                // spawning; Xcode's iphoneos SDK marks system() explicitly unavailable there,
++                // which fails this file's build for the AetherPS4-iOS target) and, independent
++                // of that, a shell-injection-shaped pattern (vName interpolated unescaped into a
++                // shell command). std::filesystem::create_directories is the portable stdlib
++                // equivalent of "mkdir -p" -- no shell, no platform-specific code needed.
++                namespace fs = std::filesystem;
++                std::error_code ec;
++                res = fs::create_directories(fs::path(vName), ec) && !ec;
+ #endif  // _IGFD_WIN_
+                 if (!res) {
+                     std::cout << "Error creating directory " << vName << std::endl;
