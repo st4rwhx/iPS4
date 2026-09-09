@@ -1,17 +1,48 @@
 name: iOS build spike
 
-# This repo (a fork of leviidev/aetherps4) has NO existing CI for its iOS target, no
-# BUILDING.md, and its top-level CMakeLists.txt has no `project()` call of its own -- the
-# AetherPS4-iOS.xcodeproj checked into the repo links ~20 separately pre-built static
-# libraries (libshadps4_ios.a, libglslang.a, libspdlog.a, libfmt.a, libz.a, libfreetype.a,
-# libopenal.a, libZycore.a, libZydis.a, libsoftfloat_3e.a, libfdk-aac.a, six libhwinfo_*.a,
-# libminiupnpc.a, ...) that must already exist at fixed LIBRARY_SEARCH_PATHS locations before
-# xcodebuild can link. There is no discoverable script that builds all of those from a clean
-# checkout, so this workflow is a genuine first attempt, not a known-good recipe being
-# replayed -- exactly the situation AYS3's own phase1 spike started from. Expected to fail
-# somewhere on the first few runs; the logs are the deliverable each time, driving the next
-# fix. continue-on-error + exhaustive logging throughout so a failure still tells us exactly
-# where and why, instead of just "red job".
+# Second attempt, informed by real evidence from the first run (see git history
+# for run 1's findings) plus a working reference pipeline for the same class of
+# problem: margooey/Madeira-actions (Wine+FEX-Emu+DXMT on iOS) builds FEXCore,
+# native libs, and links into an Xcode app via unsigned xcodebuild + zip, all
+# with small, independent per-library scripts rather than one monolithic CMake
+# super-build. This run validates the two highest-confidence, foundational
+# pieces of that pattern before building on top of them in a follow-up:
+#
+#   1. Build runtime/sources/fexcore-darwin standalone (it has its own real
+#      project(FEX C CXX ASM) CMakeLists.txt -- confirmed by direct read --
+#      unlike the repo's own top-level CMakeLists.txt, which turned out to be
+#      a misplaced duplicate of externals/CMakeLists.txt, not the real project
+#      root; see run 1's CMake errors). BUILD_FEXCORE_ONLY=ON,
+#      CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY (missing from run 1 --
+#      without it CMake's compiler check tries to link an executable, which
+#      doesn't work when cross-compiling to iOS).
+#   2. Build externals/ (already content-correct for iOS per direct diff
+#      against upstream shadps4-emu/shadPS4's externals/CMakeLists.txt --
+#      just needs a tiny project()/cmake_minimum_required() wrapper it doesn't
+#      have on its own) for spdlog/fmt/zlib/freetype/glslang/etc.
+#
+# NOT yet in this run, deliberately -- these depend on stages 1-2 actually
+# succeeding first, and are more speculative (worth their own iteration once
+# 1-2 are confirmed working, rather than compounding uncertainty in one shot):
+#
+#   3. Glob-build a shadps4_ios static library from src/, since the exact
+#      curated file list the real (missing) root CMakeLists.txt would have
+#      used isn't recoverable -- trading exact upstream parity for a
+#      pragmatic working build. Would exclude src/platform/bachata
+#      (Android-only) and define SHADPS4_ENABLE_FEX_GUEST_CPU.
+#   4. xcodebuild (unsigned, CODE_SIGNING_ALLOWED=NO, matching
+#      runtime/scripts/build-ipa.sh) against the now-portable .pbxproj (its
+#      hardcoded /Users/davi/... absolute paths were fixed to $(SRCROOT)/..
+#      in a separate commit) + package IPA.
+#
+# Still a spike: continue-on-error per stage, everything logged and uploaded
+# regardless of where it stops, so a red run still hands back the exact next
+# thing to fix. Also fixing a real bug from run 1: its "configure_exit"
+# variable was captured but never acted on, so a genuinely failing CMake
+# configure was reported as a successful step -- every configure/build step
+# here now does `exit "${PIPESTATUS[0]}"` so a real failure actually fails
+# the step (and, via continue-on-error, the job keeps going and still
+# uploads logs -- but the step's own status is now honest).
 
 on:
   workflow_dispatch:
@@ -22,6 +53,9 @@ on:
 
 permissions:
   contents: write
+
+env:
+  IOS_DEPLOYMENT_TARGET: "18.0"
 
 jobs:
   build-ios:
@@ -37,12 +71,9 @@ jobs:
       - name: Show runner environment
         run: |
           sw_vers || true
-          uname -a
           xcodebuild -version || true
           xcrun --sdk iphoneos --show-sdk-version || true
           cmake --version || true
-          ruby --version || true
-          sysctl -n hw.memsize | awk '{printf "RAM: %.1f GB\n", $1/1024/1024/1024}'
 
       - name: Install build tools
         run: |
@@ -52,116 +83,126 @@ jobs:
             echo "brew install attempt $i failed; retrying in $((i*5))s"; sleep $((i*5))
           done
           command -v ninja >/dev/null || { echo "::error::ninja missing after retries"; exit 1; }
-          gem list xcodeproj -i || gem install xcodeproj --no-document
 
-      - name: List submodule status (diagnostic)
-        if: always()
-        run: |
-          git submodule status --recursive | tee spike-submodules.txt | head -80
-          echo "--- total submodules ---"
-          git submodule status --recursive | wc -l
-
-      - name: CMake configure for arm64-apple-ios
-        id: configure
+      # ==============================================================
+      # STAGE 1: FEXCore, standalone. Flags mirror Madeira-actions'
+      # working FEX build (margooey/Madeira-actions/.github/workflows/main.yml)
+      # as closely as this fork's own runtime/sources/fexcore-darwin/CMakeLists.txt
+      # options allow (it exposes the same BUILD_FEXCORE_ONLY option Madeira's
+      # FEX fork does, plus FEXCORE_PROJECT_SOURCE_DIR/FEXCORE_GUEST_HARNESS_SOURCES
+      # for embedding this app's own guest-CPU bridge, per its own README).
+      # ==============================================================
+      - name: Configure FEXCore (standalone)
+        id: fexconfigure
         continue-on-error: true
         run: |
           set -x
-          mkdir -p runtime/build/shadps4-ios-arm64
-          cmake -S . -B runtime/build/shadps4-ios-arm64 \
-            -G Ninja \
+          cmake -S runtime/sources/fexcore-darwin -B runtime/build/fexcore-ios -G Ninja \
             -DCMAKE_SYSTEM_NAME=iOS \
-            -DCMAKE_OSX_SYSROOT=iphoneos \
+            -DCMAKE_SYSTEM_PROCESSOR=arm64 \
+            -DCMAKE_OSX_SYSROOT="$(xcrun --sdk iphoneos --show-sdk-path)" \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET" \
+            -DCMAKE_MACOSX_BUNDLE=OFF \
             -DCMAKE_BUILD_TYPE=Release \
-            -DENABLE_TESTS=OFF \
-            -DENABLE_SYSTEM_VULKAN=OFF \
-            2>&1 | tee ../spike-configure.log
-          echo "configure_exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
-        working-directory: .
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+            -DBUILD_FEXCORE_ONLY=ON \
+            -DBUILD_TESTING=OFF \
+            -DBUILD_FEX_LINUX_TESTS=OFF \
+            -DBUILD_THUNKS=OFF \
+            -DBUILD_FEXCONFIG=OFF \
+            -DENABLE_GDB_SYMBOLS=OFF \
+            -DENABLE_LTO=OFF \
+            -DENABLE_CCACHE=OFF \
+            -DENABLE_VIXL_DISASSEMBLER=OFF \
+            -DENABLE_VIXL_SIMULATOR=OFF \
+            -DENABLE_ZYDIS=OFF \
+            -DENABLE_FEXCORE_PROFILER=OFF \
+            -DTUNE_CPU=none \
+            2>&1 | tee spike-fex-configure.log
+          exit "${PIPESTATUS[0]}"
 
-      - name: Summarize configure result
-        if: always()
-        run: |
-          echo "### CMake configure" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          tail -100 spike-configure.log 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || echo "(no configure log)" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-
-      - name: CMake build (only if configure succeeded)
-        id: cmakebuild
-        if: steps.configure.outcome == 'success'
+      - name: Build FEXCore
+        id: fexbuild
+        if: steps.fexconfigure.outcome == 'success'
         continue-on-error: true
         run: |
           set -x
-          cmake --build runtime/build/shadps4-ios-arm64 --target shadps4_ios -j "$(sysctl -n hw.ncpu)" 2>&1 | tee spike-build.log
-          echo "build_exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+          cmake --build runtime/build/fexcore-ios --target FEXCore FEXCore_Base \
+            --parallel "$(sysctl -n hw.ncpu)" 2>&1 | tee spike-fex-build.log
+          exit "${PIPESTATUS[0]}"
 
-      - name: Summarize build result
+      - name: Summarize FEXCore stage
         if: always()
         run: |
-          echo "### CMake build (target shadps4_ios)" >> "$GITHUB_STEP_SUMMARY"
+          echo "### FEXCore (standalone)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          grep -iE "error:|fatal error|ninja: build stopped|undefined symbol" spike-build.log 2>/dev/null | head -60 >> "$GITHUB_STEP_SUMMARY" || echo "(no build log — configure likely failed first)" >> "$GITHUB_STEP_SUMMARY"
+          tail -60 spike-fex-configure.log 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || true
+          grep -iE "error:|FAILED" spike-fex-build.log 2>/dev/null | head -60 >> "$GITHUB_STEP_SUMMARY" || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+          find runtime/build/fexcore-ios -name "libFEXCore*.a" 2>/dev/null | tee spike-fex-libs.txt
 
-      - name: Locate produced static libraries (diagnostic)
-        if: always()
+      # ==============================================================
+      # STAGE 2: externals/ (spdlog, fmt, zlib, freetype, glslang, openal,
+      # etc.) -- content-correct for iOS already (confirmed by diff against
+      # upstream shadps4-emu/shadPS4's externals/CMakeLists.txt), just needs
+      # a real project() it doesn't have on its own account of being an
+      # add_subdirectory()-only file.
+      # ==============================================================
+      - name: Wrap externals/ with a real project()
         run: |
-          echo "--- .a files produced under runtime/build ---" | tee spike-libs-found.txt
-          find runtime/build -name "*.a" 2>/dev/null | tee -a spike-libs-found.txt || true
-          echo "--- .a files the Xcode project actually expects (from project.pbxproj) ---" >> spike-libs-found.txt
-          grep -oE 'lib[A-Za-z0-9_-]+\.a' AetherPS4-iOS/AetherPS4-iOS.xcodeproj/project.pbxproj | sort -u >> spike-libs-found.txt
-          cat spike-libs-found.txt
+          mkdir -p spike-wrapper
+          cat > spike-wrapper/CMakeLists.txt << 'EOF'
+          cmake_minimum_required(VERSION 3.24)
+          project(shadps4_ios_externals CXX C ASM)
+          set(CMAKE_CXX_STANDARD 23)
+          set(CMAKE_CXX_STANDARD_REQUIRED True)
+          set(ENABLE_DISCORD_RPC OFF CACHE BOOL "" FORCE)
+          set(ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+          set(ENABLE_UPDATER OFF CACHE BOOL "" FORCE)
+          # externals/CMakeLists.txt uses relative add_subdirectory() calls (e.g.
+          # add_subdirectory(spdlog)) resolved against ITS OWN directory, not the
+          # wrapper's -- add_subdirectory (not include()) is what makes CMake
+          # resolve those correctly, since it changes CMAKE_CURRENT_SOURCE_DIR.
+          add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../externals" externals-build)
+          EOF
 
-      - name: Build AetherPS4-iOS.xcodeproj (unsigned, matches runtime/scripts/build-ipa.sh)
-        id: xcbuild
+      - name: Configure externals
+        id: extconfigure
         continue-on-error: true
         run: |
           set -x
-          cd AetherPS4-iOS
-          xcodebuild \
-            -project AetherPS4-iOS.xcodeproj \
-            -scheme AetherPS4-iOS \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination "generic/platform=iOS" \
-            CODE_SIGNING_ALLOWED=NO \
-            build 2>&1 | tee ../spike-xcodebuild.log
-          echo "xcbuild_exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+          cmake -S spike-wrapper -B runtime/build/shadps4-ios/externals -G Ninja \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_SYSROOT="$(xcrun --sdk iphoneos --show-sdk-path)" \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+            2>&1 | tee spike-externals-configure.log
+          exit "${PIPESTATUS[0]}"
 
-      - name: Summarize xcodebuild result
+      - name: Summarize externals stage
         if: always()
         run: |
-          echo "### xcodebuild" >> "$GITHUB_STEP_SUMMARY"
+          echo "### externals/" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          grep -iE "error:|BUILD FAILED|BUILD SUCCEEDED|Undefined symbol|library not found" spike-xcodebuild.log 2>/dev/null | head -80 >> "$GITHUB_STEP_SUMMARY" || echo "(no xcodebuild log)" >> "$GITHUB_STEP_SUMMARY"
+          tail -80 spike-externals-configure.log 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Package unsigned IPA (only if xcodebuild succeeded)
-        id: package
-        if: steps.xcbuild.outcome == 'success'
-        continue-on-error: true
-        run: |
-          set -x
-          chmod +x runtime/scripts/build-ipa.sh
-          ./runtime/scripts/build-ipa.sh "$PWD/ipa-out"
-          ls -la ipa-out/
-
-      - name: Upload ALL spike logs (always, whatever happened)
+      - name: Upload ALL spike logs (always)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ios-spike-logs
-          path: |
-            spike-*.log
-            spike-*.txt
+          path: spike-*.log
           if-no-files-found: warn
 
-      - name: Upload unsigned IPA (if produced)
+      - name: Upload FEXCore libs (if produced)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AetherPS4-iOS-unsigned-ipa
-          path: ipa-out/*.ipa
+          name: fexcore-ios-libs
+          path: |
+            runtime/build/fexcore-ios/**/libFEXCore*.a
           if-no-files-found: warn
