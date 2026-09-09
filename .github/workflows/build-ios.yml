@@ -43,6 +43,30 @@ name: iOS build spike
 # here now does `exit "${PIPESTATUS[0]}"` so a real failure actually fails
 # the step (and, via continue-on-error, the job keeps going and still
 # uploads logs -- but the step's own status is now honest).
+#
+# Update (attempt 6): the "misplaced duplicate" framing above for the root
+# CMakeLists.txt turned out to be wrong, per direct confirmation from the
+# upstream maintainer (checked their own git history): the 405-line file is
+# the repo's actual, intentional, long-standing state -- there's a commit
+# titled "Revert accidental CMakeLists.txt overwrite from the previous
+# commit" where an earlier commit briefly copied the real ~1736-line root
+# file (from a private downstream repo, Bachata-S4) over it by mistake, and
+# that got caught and reverted the same day. The real build happens
+# privately; its output .a files are copied into this repo's runtime/build/
+# paths for Xcode to link against. There is no public "real root file" to
+# restore -- stages 3-4 above (globbing a shadps4_ios target from src/) are
+# therefore not a stopgap for a temporarily-missing file, they're the only
+# way to get a from-source build out of the public repo at all.
+#
+# That also explains why attempt 5's externals build only produced
+# pugixml.a: externals/CMakeLists.txt:6-8 sets EXCLUDE_FROM_ALL ON for its
+# whole directory (inherited by every add_subdirectory() under it), on the
+# assumption that a real consumer target's target_link_libraries() would
+# pull in what it actually needs. We don't have that consumer yet (stage 3),
+# so this attempt adds a forcing target in the wrapper that walks the
+# externals/ directory tree for every real CMake target and add_dependencies()
+# onto it directly -- exclusion only opts a target out of being a *root* of
+# the default build, not out of being pulled in as a dependency.
 
 on:
   workflow_dispatch:
@@ -174,6 +198,51 @@ jobs:
           # wrapper's -- add_subdirectory (not include()) is what makes CMake
           # resolve those correctly, since it changes CMAKE_CURRENT_SOURCE_DIR.
           add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../externals" externals-build)
+
+          # externals/CMakeLists.txt:6-8 does
+          #   set_directory_properties(PROPERTIES EXCLUDE_FROM_ALL ON SYSTEM ON)
+          # which makes EXCLUDE_FROM_ALL the inherited default for every
+          # add_subdirectory() underneath it (confirmed by direct read) --
+          # i.e. essentially every library target in the whole externals/
+          # tree (spdlog, fmt, zlib-ng, freetype, glslang, openal-soft, ...)
+          # is excluded from the default `all` target unless something pulls
+          # it in via a real dependency edge. Normally that puller is the
+          # real shadps4_ios/shadPS4 target's target_link_libraries(), which
+          # doesn't exist in this repo (see the CMake-gap note at the top of
+          # this workflow). Confirmed by evidence, not guesswork: run 5's
+          # build log showed only pugixml's 3 ninja steps ran, even though
+          # configure succeeded cleanly for the whole tree.
+          #
+          # Rather than hand-enumerate every real CMake target name (which
+          # can differ from the .a filename, e.g. zlib-ng's is "zlibstatic"),
+          # walk the directory tree CMake already built and force a
+          # dependency edge onto every buildable target it finds. A target
+          # marked EXCLUDE_FROM_ALL still builds if something depends on it
+          # via add_dependencies() -- exclusion only opts a target out of
+          # being a *root* of the default build, not out of being pulled in
+          # as a dependency of one.
+          function(collect_targets_recursive out_var dir)
+            set(_found)
+            get_property(_subdirs DIRECTORY "${dir}" PROPERTY SUBDIRECTORIES)
+            foreach(_subdir IN LISTS _subdirs)
+              collect_targets_recursive(_sub_found "${_subdir}")
+              list(APPEND _found ${_sub_found})
+            endforeach()
+            get_property(_dir_targets DIRECTORY "${dir}" PROPERTY BUILDSYSTEM_TARGETS)
+            list(APPEND _found ${_dir_targets})
+            set(${out_var} ${_found} PARENT_SCOPE)
+          endfunction()
+
+          collect_targets_recursive(_externals_targets "${CMAKE_CURRENT_SOURCE_DIR}/../externals")
+          add_custom_target(build_all_externals ALL)
+          foreach(_t IN LISTS _externals_targets)
+            if(TARGET ${_t})
+              get_target_property(_t_type ${_t} TYPE)
+              if(_t_type MATCHES "^(STATIC_LIBRARY|SHARED_LIBRARY|MODULE_LIBRARY|OBJECT_LIBRARY|EXECUTABLE)$")
+                add_dependencies(build_all_externals ${_t})
+              endif()
+            endif()
+          endforeach()
           EOF
 
       - name: Configure externals
@@ -200,6 +269,7 @@ jobs:
         run: |
           set -x
           cmake --build runtime/build/shadps4-ios/externals \
+            --target build_all_externals \
             --parallel "$(sysctl -n hw.ncpu)" 2>&1 | tee spike-externals-build.log
           exit "${PIPESTATUS[0]}"
 
