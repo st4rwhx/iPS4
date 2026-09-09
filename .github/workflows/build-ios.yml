@@ -505,6 +505,15 @@ jobs:
               # side effect of building FEXCore itself (confirmed: FEXCore.a already builds
               # clean), so it already exists -- just needed on our own include path too.
               "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/build/fexcore-ios/include"
+              # FEXCore/fextl/robin_map.h (FEXCore's own STL-like container library, pulled in
+              # transitively via FEXCore/Core/Context.h -> FEXCore/Core/CodeCache.h) needs
+              # ankerl::unordered_dense -- FEXCore's own vendored copy at
+              # External/unordered_dense/include, added via the top-level fexcore-darwin
+              # CMakeLists.txt's add_subdirectory(External/unordered_dense) and PUBLIC-linked
+              # into the real FEXCore target there. We link FEXCore by raw .a path rather than
+              # as a real CMake target, so that PUBLIC include propagation never reaches us --
+              # same situation as every other FEXCore-internal path added above.
+              "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/sources/fexcore-darwin/External/unordered_dense/include"
           )
 
           # FEXCore (Stage 1) is a separate CMake project's build output, not a target visible
