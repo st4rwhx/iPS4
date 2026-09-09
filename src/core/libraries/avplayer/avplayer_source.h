@@ -9,11 +9,11 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <stop_token>
 #include <string_view>
 #include <utility>
 
 #include "common/assert.h"
+#include "common/polyfill_thread.h"
 #include "core/libraries/avplayer/avplayer.h"
 #include "core/libraries/avplayer/avplayer_common.h"
 #include "core/libraries/avplayer/avplayer_data_streamer.h"

@@ -9,6 +9,7 @@
 #include "common/logging/formatter.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
+#include "common/polyfill_thread.h"
 #include "common/singleton.h"
 #include "common/string_util.h"
 #include "common/thread.h"

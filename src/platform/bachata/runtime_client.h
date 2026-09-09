@@ -11,6 +11,7 @@
 #include <thread>
 #include <mutex>
 
+#include "common/polyfill_thread.h"
 #include "platform/bachata/controller_snapshot.h"
 
 namespace Platform::Bachata {

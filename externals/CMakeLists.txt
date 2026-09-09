@@ -192,6 +192,15 @@ add_library(Dear_ImGui
         dear_imgui/imgui_widgets.cpp
 )
 target_include_directories(Dear_ImGui INTERFACE dear_imgui/)
+# src/imgui/imgui_config.h (IMGUI_USER_CONFIG, imgui.h's own supported hook, see its own
+# comment right above the #ifdef) customizes real ABI, not just optional math sugar --
+# ImDrawIdx is redefined to a 32-bit type there, so every translation unit that includes
+# imgui.h anywhere in this app needs to see the identical config or draw-index buffers
+# silently mismatch in size between object files compiled with vs without it. PUBLIC here
+# so shadps4_ios (which links Dear_ImGui) inherits both the same include path and the same
+# define automatically, rather than needing to duplicate this in every consumer.
+target_include_directories(Dear_ImGui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../src")
+target_compile_definitions(Dear_ImGui PUBLIC IMGUI_USER_CONFIG="imgui/imgui_config.h")
 
 # Tracy
 if (CMAKE_BUILD_TYPE STREQUAL "Release")

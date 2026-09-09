@@ -12,6 +12,7 @@
 #include <tsl/robin_map.h>
 
 #include "common/lru_cache.h"
+#include "common/polyfill_thread.h"
 #include "common/slot_vector.h"
 #include "shader_recompiler/resource.h"
 #include "video_core/multi_level_page_table.h"

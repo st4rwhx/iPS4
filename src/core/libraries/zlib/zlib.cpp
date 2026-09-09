@@ -9,6 +9,7 @@
 #include <queue>
 
 #include "common/logging/log.h"
+#include "common/polyfill_thread.h"
 #include "common/thread.h"
 #include "core/libraries/kernel/threads.h"
 #include "core/libraries/libs.h"

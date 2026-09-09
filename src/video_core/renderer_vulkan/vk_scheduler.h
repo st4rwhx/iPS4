@@ -8,6 +8,7 @@
 #include <thread>
 #include <queue>
 
+#include "common/polyfill_thread.h"
 #include "common/unique_function.h"
 #include "video_core/amdgpu/regs_color.h"
 #include "video_core/amdgpu/regs_primitive.h"

@@ -9,6 +9,7 @@
 #include <string_view>
 #include <thread>
 
+#include "common/polyfill_thread.h"
 #include "common/singleton.h"
 #include "core/linker.h"
 #include "input/controller.h"
