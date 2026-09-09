@@ -1,6 +1,15 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <TargetConditionals.h>
+
+// sdl_window.cpp's own SetWindowIcon already documents the split: macOS uses this
+// AppKit-based native-dock-icon implementation, while iOS (no AppKit, no per-window
+// dock icon concept) falls back to the generic SDL3+stb_image path there instead. This
+// file itself never carried the matching guard, so it still tried to compile against
+// <Cocoa/Cocoa.h> (a macOS-only framework header, absent from the iOS SDK) on iOS too.
+#if !TARGET_OS_IPHONE
+
 #include <filesystem>
 #include <Cocoa/Cocoa.h>
 #include <SDL3/SDL_video.h>
@@ -46,3 +55,5 @@ void SetWindowIcon(SDL_Window* window, const std::vector<u8>& png) {
 }
 
 } // namespace Frontend
+
+#endif // !TARGET_OS_IPHONE
