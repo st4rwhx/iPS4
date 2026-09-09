@@ -467,6 +467,18 @@ jobs:
                "${CMAKE_CURRENT_SOURCE_DIR}/../src/*.cpp"
                "${CMAKE_CURRENT_SOURCE_DIR}/../src/*.mm")
 
+          # src/core/libraries/usbd/ implements real USB peripheral passthrough (Guitar Hero
+          # controllers, Skylanders portal, Disney Infinity base) via libusb -- genuinely
+          # inapplicable on iOS (sandboxed apps have no raw USB host access at all, unlike a
+          # missing-dependency problem we could work around) and libusb itself is already
+          # excluded from this iOS build (externals/CMakeLists.txt's own iOS guard, fixed early
+          # in this whole effort). The codebase already has a ready-made escape hatch for exactly
+          # this -- ipc.cpp and libs.cpp both already guard every usbd call site with #ifndef
+          # SHADPS4_DISABLE_USBD -- but usbd.cpp itself (and usb_backend.h's #include <libusb.h>)
+          # isn't internally guarded the same way, so it still needs excluding from the glob
+          # outright rather than just defining the macro.
+          list(FILTER SHADPS4_IOS_SOURCES EXCLUDE REGEX "/src/core/libraries/usbd/")
+
           add_library(shadps4_ios STATIC ${SHADPS4_IOS_SOURCES})
           add_dependencies(shadps4_ios host_shaders)
           target_compile_features(shadps4_ios PUBLIC cxx_std_23)
@@ -484,6 +496,7 @@ jobs:
           # without this, FEXCore's own headers silently fall through to their x86-64 branch even
           # though we're building for arm64.
           target_compile_definitions(shadps4_ios PRIVATE ARCHITECTURE_arm64=1)
+          target_compile_definitions(shadps4_ios PRIVATE SHADPS4_DISABLE_USBD)
           target_include_directories(shadps4_ios PUBLIC
               "${CMAKE_CURRENT_SOURCE_DIR}/../src"
               # A handful of files use paths relative to the repo ROOT rather than src/ or
