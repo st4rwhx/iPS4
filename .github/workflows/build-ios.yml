@@ -497,6 +497,14 @@ jobs:
               # sources use.
               "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/sources/fexcore-darwin/FEXCore/Source"
               "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/build/fexcore-ios/FEXCore/Source"
+              # FEXCore/Config/Config.h (reached transitively via Common/Config.h) itself
+              # #include <FEXCore/Config/ConfigValues.inl> -- a file FEXCore/Source/CMakeLists.txt
+              # generates at build time (config_generator.py) into
+              # ${CMAKE_BINARY_DIR}/include/FEXCore/Config/, i.e. this FEXCore build's own
+              # include/ tree, not its source tree at all. Stage 1 already produces this as a
+              # side effect of building FEXCore itself (confirmed: FEXCore.a already builds
+              # clean), so it already exists -- just needed on our own include path too.
+              "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/build/fexcore-ios/include"
           )
 
           # FEXCore (Stage 1) is a separate CMake project's build output, not a target visible
