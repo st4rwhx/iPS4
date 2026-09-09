@@ -193,20 +193,34 @@ jobs:
             2>&1 | tee spike-externals-configure.log
           exit "${PIPESTATUS[0]}"
 
+      - name: Build externals
+        id: extbuild
+        if: steps.extconfigure.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -x
+          cmake --build runtime/build/shadps4-ios/externals \
+            --parallel "$(sysctl -n hw.ncpu)" 2>&1 | tee spike-externals-build.log
+          exit "${PIPESTATUS[0]}"
+
       - name: Summarize externals stage
         if: always()
         run: |
           echo "### externals/" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          tail -80 spike-externals-configure.log 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || true
+          tail -40 spike-externals-configure.log 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || true
+          grep -iE "error:|FAILED" spike-externals-build.log 2>/dev/null | head -100 >> "$GITHUB_STEP_SUMMARY" || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+          find runtime/build/shadps4-ios/externals -name "*.a" 2>/dev/null | sort | tee spike-externals-libs.txt
 
       - name: Upload ALL spike logs (always)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ios-spike-logs
-          path: spike-*.log
+          path: |
+            spike-*.log
+            spike-*.txt
           if-no-files-found: warn
 
       - name: Upload FEXCore libs (if produced)
