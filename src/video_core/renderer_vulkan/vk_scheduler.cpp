@@ -213,8 +213,14 @@ void Scheduler::PriorityPendingOpsThread(std::stop_token stoken) {
         PendingOp op;
         {
             std::unique_lock lk(priority_pending_ops_mutex);
-            priority_pending_ops_cv.wait(lk, stoken,
-                                         [this] { return !priority_pending_ops.empty(); });
+            // condition_variable_any::wait(lock, stop_token, pred) is a real C++20 overload, but
+            // only where the standard library ships std::stop_token support
+            // (__cpp_lib_jthread) -- Apple's libc++ doesn't. Same portable-polyfill fix as
+            // elsewhere in this codebase (common/polyfill_thread.h's Common::CondvarWait); the
+            // stop_requested() check right below already handles telling stop apart from the
+            // predicate becoming true, so no other change needed here.
+            Common::CondvarWait(priority_pending_ops_cv, lk, stoken,
+                                [this] { return !priority_pending_ops.empty(); });
             if (stoken.stop_requested()) {
                 break;
             }

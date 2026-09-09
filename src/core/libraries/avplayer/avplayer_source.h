@@ -120,8 +120,19 @@ public:
 
     template <class Pred>
     bool Wait(std::stop_token stop, Pred pred) {
+        // std::condition_variable::wait(lock, stop_token, pred) is a real, portable C++20
+        // overload -- but only on standard library implementations that actually ship
+        // std::stop_token support (__cpp_lib_jthread), which Apple's libc++ doesn't. This
+        // codebase already has a polyfill-safe equivalent for exactly that gap
+        // (common/polyfill_thread.h's Common::CondvarWait, already used the same way in
+        // bounded_threadsafe_queue.h, video_core/amdgpu/liverpool.cpp, video_core/
+        // cache_storage.cpp, and core/libraries/kernel/kernel.cpp) -- this was simply the one
+        // remaining call site still calling the native 3-argument wait() directly. Re-evaluating
+        // pred() after CondvarWait returns matches the real STL overload's own semantics: it
+        // reports whether the predicate is satisfied, not merely why the wait woke up.
         std::unique_lock lock(m_mutex);
-        return m_cv.wait(lock, std::move(stop), std::move(pred));
+        Common::CondvarWait(m_cv, lock, std::move(stop), pred);
+        return pred();
     }
 
     template <class Pred, class Rep, class Period>

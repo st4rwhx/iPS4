@@ -48,8 +48,15 @@ void ZlibTaskThread(const std::stop_token& stop) {
         InflateTask task;
         {
             // Lock and pop from the task queue, unless stop has been requested.
+            // condition_variable_any::wait(lock, stop_token, pred) is a real C++20 overload, but
+            // only where the standard library actually ships std::stop_token support
+            // (__cpp_lib_jthread) -- Apple's libc++ doesn't. Same portable-polyfill fix as
+            // avplayer_source.h's EventCV::Wait: Common::CondvarWait + re-check the predicate,
+            // matching the real overload's own semantics.
             std::unique_lock lock(mutex);
-            if (!task_queue_cv.wait(lock, stop, [&] { return !task_queue.empty(); })) {
+            auto has_task = [&] { return !task_queue.empty(); };
+            Common::CondvarWait(task_queue_cv, lock, stop, has_task);
+            if (!has_task()) {
                 break;
             }
             task = task_queue.front();
