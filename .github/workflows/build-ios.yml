@@ -501,7 +501,16 @@ jobs:
               GIT_TAG 2.0.1
           )
           FetchContent_Populate(cmrc)
+          # CMakeRC.cmake's own cmake_minimum_required(VERSION 2.8...) predates CMake's
+          # removed-compatibility floor (<3.5), which newer CMake (this runner's Homebrew
+          # build) now hard-rejects instead of just warning. CMakeRC itself is otherwise
+          # untouched/vendored as-is -- CMAKE_POLICY_VERSION_MINIMUM is CMake's own documented
+          # escape hatch for exactly this (its error message names this variable directly),
+          # scoped tightly around just this one include() so it doesn't mask real policy
+          # issues anywhere else in the build.
+          set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
           include("${cmrc_SOURCE_DIR}/CMakeRC.cmake")
+          unset(CMAKE_POLICY_VERSION_MINIMUM)
 
           set(SHADPS4_IOS_RESOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../src/resources")
           cmrc_add_resource_library(res
