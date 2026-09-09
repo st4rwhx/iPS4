@@ -3,6 +3,11 @@
 
 #pragma once
 
+// Every call site (emulator.cpp) already guards both its #include of this header and its
+// only usage with #ifdef ENABLE_DISCORD_RPC -- this file just needs the same guard so it
+// doesn't unconditionally pull in <discord_rpc.h> when compiled on its own.
+#ifdef ENABLE_DISCORD_RPC
+
 #include <cstdint>
 #include <string>
 #include <discord_rpc.h>
@@ -28,3 +33,5 @@ public:
 };
 
 } // namespace DiscordRPCHandler
+
+#endif // ENABLE_DISCORD_RPC

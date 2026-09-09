@@ -5,6 +5,8 @@
 #include <ctime>
 #include "discord_rpc_handler.h"
 
+#ifdef ENABLE_DISCORD_RPC
+
 namespace DiscordRPCHandler {
 
 void RPC::init() {
@@ -55,3 +57,5 @@ bool RPC::getRPCEnabled() {
 }
 
 } // namespace DiscordRPCHandler
+
+#endif // ENABLE_DISCORD_RPC
