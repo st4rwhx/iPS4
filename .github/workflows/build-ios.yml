@@ -237,13 +237,28 @@ jobs:
             2>&1 | tee spike-fex-configure.log
           exit "${PIPESTATUS[0]}"
 
+      # Common/CommonTools/JemallocLibs are EXCLUDE_FROM_ALL under BUILD_FEXCORE_ONLY (same
+      # reason as externals/'s own EXCLUDE_FROM_ALL, see Stage 2) so building only
+      # FEXCore/FEXCore_Base never touched them. AetherPS4-iOS.xcodeproj's own library list
+      # references libcpp-optparse.a, librpmalloc.a, libcephes_128bit.a, libtiny-json.a,
+      # libJemallocLibs.a -- confirmed by reading this repo's own Source/Common/CMakeLists.txt
+      # (Common links cpp-optparse + tiny-json::tiny-json directly) and
+      # FEXCore/Source/CMakeLists.txt (JemallocLibs links rpmalloc when
+      # ENABLE_JEMALLOC_GLIBC_ALLOC=OFF, which this workflow already sets; FEXCore's own LIBS
+      # already includes cephes_128bit) that these are FEXCore's own vendored dependencies, not
+      # something externals/ or shadps4_ios's own sources provide. Building Common/CommonTools/
+      # JemallocLibs directly (rather than the fexcore-smoke executable that pulls them in --
+      # that's an iOS executable link, a separate, unnecessary risk to take on here) forces
+      # CMake's dependency graph to build the whole vendored closure without needing to name
+      # rpmalloc/cephes_128bit/tiny-json/cpp-optparse individually.
       - name: Build FEXCore
         id: fexbuild
         if: steps.fexconfigure.outcome == 'success'
         continue-on-error: true
         run: |
           set -x
-          cmake --build runtime/build/fexcore-ios --target FEXCore FEXCore_Base \
+          cmake --build runtime/build/fexcore-ios \
+            --target FEXCore FEXCore_Base Common CommonTools JemallocLibs \
             --parallel "$(sysctl -n hw.ncpu)" 2>&1 | tee spike-fex-build.log
           exit "${PIPESTATUS[0]}"
 
@@ -255,7 +270,7 @@ jobs:
           tail -60 spike-fex-configure.log 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || true
           grep -iE "error:|FAILED" spike-fex-build.log 2>/dev/null | head -60 >> "$GITHUB_STEP_SUMMARY" || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          find runtime/build/fexcore-ios -name "libFEXCore*.a" 2>/dev/null | tee spike-fex-libs.txt
+          find runtime/build/fexcore-ios -name "*.a" 2>/dev/null | sort | tee spike-fex-libs.txt
 
       # ==============================================================
       # STAGE 2: externals/ (spdlog, fmt, zlib, freetype, glslang, openal,
@@ -388,5 +403,5 @@ jobs:
         with:
           name: fexcore-ios-libs
           path: |
-            runtime/build/fexcore-ios/**/libFEXCore*.a
+            runtime/build/fexcore-ios/**/*.a
           if-no-files-found: warn
