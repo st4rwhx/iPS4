@@ -1,0 +1,72 @@
+name: Enable Extended Virtual Addressing capability
+
+# Manual, credential-touching utility -- deliberately its own workflow, never auto-triggered
+# by push/PR, so a real Apple ID session is only ever used when someone explicitly runs it.
+#
+# Context: AetherPS4-iOS.entitlements requests two independent memory-pressure entitlements
+# (com.apple.developer.kernel.increased-memory-limit and
+# com.apple.developer.kernel.extended-virtual-addressing -- SetupCheckView.swift's runtime
+# check accepts either one). For a sideloaded (non-App-Store) install, Apple only actually
+# grants an entitlement if the App ID's own capability is enabled on the Developer Portal
+# first -- declaring it in .entitlements alone is necessary but not sufficient, and default
+# sideloading silently drops anything the signing tool doesn't know to request.
+#
+# increased-memory-limit has no documented, API-reachable way to toggle it at all (confirmed
+# by reading fastlane/spaceship's own BundleIdCapability::Type source -- it simply isn't in
+# Apple's public capability list; the only known way to enable it for a free/personal-team
+# Apple ID is Xcode's own GUI "+ Capability" flow, which needs a real Mac).
+#
+# extended-virtual-addressing IS a documented, first-class capability
+# (BundleIdCapability::Type::EXTENDED_VIRTUAL_ADDRESSING) that fastlane's `produce
+# enable_services --extended-virtual-address-space` can toggle directly via the Apple
+# Developer Portal API -- no Mac, no Xcode GUI required, just this macOS runner (fastlane
+# itself is pure Ruby, but a macOS runner keeps this consistent with the rest of this repo's
+# CI and avoids any platform surprises). Since our own runtime check already accepts either
+# entitlement, enabling just this one is a complete fix on its own.
+#
+# One-time setup this workflow depends on (cannot be done from CI -- needs your own 2FA):
+#   1. On any machine with Ruby (Linux/WSL/macOS/a GitHub Codespace all work -- no Mac
+#      required for this step): `gem install fastlane` then
+#      `fastlane spaceauth -u your@appleid.com`. Approve the 2FA prompt on your device.
+#      This prints a session string -- copy it whole.
+#   2. In this repo's Settings -> Secrets and variables -> Actions, add:
+#        FASTLANE_USER    = your Apple ID email
+#        FASTLANE_SESSION = the session string spaceauth printed
+#      (No Apple ID password is ever stored -- the session cookie is what authenticates.
+#      Sessions expire periodically; re-run spaceauth and update the secret if this workflow
+#      starts failing to authenticate.)
+#   3. Run this workflow (Actions tab -> "Enable Extended Virtual Addressing capability" ->
+#      Run workflow), confirming the exact bundle ID your sideloading tool registered (check
+#      it in SideStore's app details -- it defaults to this project's own com.aether.ps4ios,
+#      but override it if SideStore assigned something different, e.g. a team-ID suffix).
+
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_id:
+        description: 'App ID to enable the capability for (check the exact value in SideStore if unsure)'
+        required: true
+        default: 'com.aether.ps4ios'
+
+permissions:
+  contents: read
+
+jobs:
+  enable-capability:
+    runs-on: macos-15
+    steps:
+      - name: Install fastlane
+        run: gem install fastlane --no-document
+
+      - name: Enable Extended Virtual Address Space capability
+        env:
+          FASTLANE_USER: ${{ secrets.FASTLANE_USER }}
+          FASTLANE_SESSION: ${{ secrets.FASTLANE_SESSION }}
+        run: |
+          if [ -z "$FASTLANE_USER" ] || [ -z "$FASTLANE_SESSION" ]; then
+            echo "::error::FASTLANE_USER and/or FASTLANE_SESSION secrets are not set. See this workflow file's own header comment for the one-time 'fastlane spaceauth' setup." >&2
+            exit 1
+          fi
+          fastlane produce enable_services \
+            -a "${{ inputs.bundle_id }}" \
+            --extended-virtual-address-space
