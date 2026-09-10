@@ -908,7 +908,43 @@ jobs:
           tail -30 spike-stage4-stage.log 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || true
           grep -iE "error:|BUILD FAILED|BUILD SUCCEEDED" spike-xcodebuild.log 2>/dev/null | head -150 >> "$GITHUB_STEP_SUMMARY" || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          find /Users/runner/Library/Developer/Xcode/DerivedData -iname "AetherPS4-iOS.app" -maxdepth 6 2>/dev/null | tee spike-stage4-app.txt || true
+          # Building by -target with no scheme/workspace makes xcodebuild use the project's
+          # own legacy build location (AetherPS4-iOS/build/<config>-<sdk>/) rather than the
+          # newer DerivedData path -- confirmed directly from attempt 32's own successful
+          # build log ("Ld .../AetherPS4-iOS/build/Release-iphoneos/AetherPS4-iOS.app/...").
+          # Searching DerivedData alone (this step's original check) is why attempt 32 was
+          # reported as not having produced an app even though BUILD SUCCEEDED -- search both
+          # rather than assuming a single fixed location.
+          { find AetherPS4-iOS/build -iname "AetherPS4-iOS.app" -maxdepth 4 2>/dev/null; \
+            find /Users/runner/Library/Developer/Xcode/DerivedData -iname "AetherPS4-iOS.app" -maxdepth 6 2>/dev/null; } \
+            | tee spike-stage4-app.txt || true
+
+      - name: Package unsigned IPA (Stage 4 deliverable)
+        id: packageipa
+        if: steps.xcodebuild4.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          APP_PATH="$(head -n1 spike-stage4-app.txt)"
+          if [[ -z "$APP_PATH" || ! -d "$APP_PATH" ]]; then
+            echo "No AetherPS4-iOS.app found to package (looked at: ${APP_PATH:-<empty>})" >&2
+            exit 1
+          fi
+          IPA_OUT="$(pwd)/spike-ipa-out/AetherPS4-iOS.ipa"
+          mkdir -p "$(dirname "$IPA_OUT")"
+          WORK_DIR="$(mktemp -d)"
+          mkdir -p "$WORK_DIR/Payload"
+          cp -R "$APP_PATH" "$WORK_DIR/Payload/"
+          (cd "$WORK_DIR" && zip -qr "$IPA_OUT" Payload)
+          ls -la "$(dirname "$IPA_OUT")"
+
+      - name: Upload unsigned IPA (if produced)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AetherPS4-iOS-unsigned-ipa
+          path: spike-ipa-out/AetherPS4-iOS.ipa
+          if-no-files-found: warn
 
       - name: Upload ALL spike logs (always)
         if: always()
