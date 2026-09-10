@@ -44,18 +44,25 @@ iOS 26+, so there's no conflict there.
 2. In LiveContainer's settings, under JIT, pick **StikDebug** as the JIT
    enabler.
 3. Enable the memory capability for LiveContainer's own App ID
-   (`com.kdt.livecontainer.<yourteamid>`) using **either**:
+   (`com.kdt.livecontainer.<yourteamid>` -- check LiveContainer's own app
+   details for the exact value) using **either**:
    - [GetMoreRam](https://github.com/hugeBlack/GetMoreRam) run as a guest
      app inside LiveContainer itself (the common community path for this --
      see [this walkthrough](https://docvault.celloserenity.dev/walkthroughs/LiveContainer-iOS-26-JIT/getmoreram)).
      As of this writing GetMoreRam has a real sign-in bug (see "Why not
      GetMoreRam?" below) that may still block this regardless of which App
      ID it's targeting -- if you hit that, use the next option instead.
-   - Or the same `fastlane` recipe from Option B below, just pointed at
-     LiveContainer's bundle ID instead of AetherPS4-iOS's.
-4. Load AetherPS4-iOS's `.ipa` into LiveContainer as a guest app (instead of
-   installing it directly via SideStore) and launch it from there, with
-   "Launch with JIT" enabled for it.
+   - Or [`runtime/scripts/enable-memory-entitlement.sh`](../runtime/scripts/enable-memory-entitlement.sh)
+     (see Option B below for how to run it), entering LiveContainer's bundle
+     ID when it asks instead of AetherPS4-iOS's.
+4. **You do NOT sideload AetherPS4-iOS through SideStore at all in this
+   option.** Download AetherPS4-iOS's `.ipa` (e.g. from this repo's
+   [`ios-latest` release](https://github.com/st4rwhx/iPS4/releases/tag/ios-latest))
+   onto your device, open LiveContainer, tap the **+** button in the top
+   right, and pick that `.ipa` file. It gets imported and runs as a guest
+   app entirely inside LiveContainer -- it never appears as its own
+   separate home-screen app or gets its own SideStore entry. Launch it from
+   inside LiveContainer, with "Launch with JIT" enabled for it.
 
 **Known unknown:** this app is more involved than a typical LiveContainer
 guest -- it ships its own `Frameworks/BreakpointJIT.framework`, does its own
@@ -76,60 +83,42 @@ you'd repeat it for any other memory-hungry app you sideload in the future.
 it -- the only known route is Xcode's own GUI (a real Mac). But
 `extended-virtual-addressing` *is* a fully documented, API-reachable
 capability, and this app already accepts it as an equally valid alternative.
-You can enable it for your own Apple ID with `fastlane`, which is a plain
-Ruby gem. No Mac, no Xcode, no paid Apple Developer Program membership --
-and the two-factor approval below only your own device can complete, so
-there's no way around doing this yourself once, but this repo is set up so
-the *environment* for it costs you nothing to set up:
+[`runtime/scripts/enable-memory-entitlement.sh`](../runtime/scripts/enable-memory-entitlement.sh)
+enables it for your own Apple ID using `fastlane` -- a mature, widely-used
+tool talking to Apple's real Developer Portal API, rather than an
+unmaintained reimplementation of Apple's private auth protocol (see "Why not
+GetMoreRam?" below for why that distinction matters). No Mac, no Xcode, no
+paid Apple Developer Program membership -- and the two-factor approval it
+prompts you for is the one part only your own device can complete; that's a
+limit of Apple's own two-factor system, not of this script, and nothing
+(this script, GetMoreRam, or anyone else) can automate around it. This repo
+is set up so the *environment* for running it costs you nothing to set up:
 
 0. **Open a Codespace on this repo** -- github.com/st4rwhx/iPS4, green
    "Code" button -> Codespaces tab -> "Create codespace on main". This opens
    a full terminal in your browser (works from a phone, though a larger
-   screen makes typing the commands below easier) with `fastlane` already
-   installed for you -- nothing to configure. Skip step 1 below; go straight
-   to step 2 in the terminal panel that opens. (Delete the Codespace when
-   you're done -- Settings -> Codespaces on GitHub's site, or just let it
-   auto-stop; you won't need it again unless your session expires.)
+   screen makes typing easier) with `fastlane` already installed for you --
+   nothing to configure. (Delete the Codespace when you're done -- Settings
+   -> Codespaces on GitHub's site, or just let it auto-stop; you won't need
+   it again unless your session expires.)
 
    If you'd rather use your own Linux/WSL/macOS machine instead, that works
-   identically -- just do step 1 there first.
+   identically (the script installs `fastlane` itself if it's missing).
 
-1. **Install fastlane** (only if not using the Codespace above, which
-   already has it):
+1. **Run the script:**
    ```sh
-   gem install fastlane
+   ./runtime/scripts/enable-memory-entitlement.sh
    ```
+   It walks you through everything in one go: your Apple ID email, which App
+   ID to target (defaults to this app's own `com.aether.ps4ios`, or enter
+   LiveContainer's bundle ID instead if you're using Option A), then your
+   Apple ID password and a 2FA code if prompted -- all inline, no separate
+   steps to remember.
 
-2. **Authenticate once, interactively** (this is the only step that needs
-   your own two-factor approval -- do it on whichever device gets your 2FA
-   prompts). This genuinely can't be automated or split into two steps by
-   anyone, including a helper script or CI -- Apple's own two-factor flow
-   requires requesting and submitting the code in the same live session:
-   ```sh
-   fastlane spaceauth -u your@appleid.com
-   ```
-   Approve the prompt on your device. This prints a session string to your
-   terminal -- you won't need to save it anywhere; the next command runs
-   right after in the same session.
-
-3. **Find your app's exact bundle ID.** Open SideStore, tap AetherPS4-iOS in
-   your app list, and check its App ID -- it's usually `com.aether.ps4ios`
-   exactly as built, but SideStore occasionally appends a suffix for
-   free-account App ID limits. Use whatever it actually shows.
-
-4. **Enable the capability:**
-   ```sh
-   fastlane produce enable_services \
-     -a com.aether.ps4ios \
-     --extended-virtual-address-space
-   ```
-   (replace `com.aether.ps4ios` with your app's actual bundle ID from step 3
-   if it differs)
-
-5. **Reinstall (not "Refresh") AetherPS4-iOS from SideStore.** SideStore
-   will regenerate the provisioning profile for your App ID, which now
-   includes the capability you just enabled -- so the entitlement should be
-   present in the resigned app's real signature this time.
+2. **Reinstall (not "Refresh") the app whose bundle ID you entered, from
+   SideStore.** SideStore will regenerate its provisioning profile, which
+   now includes the capability you just enabled -- so the entitlement
+   should be present in the resigned app's real signature this time.
 
 ## Why not GetMoreRam?
 
