@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		049A9766DE0F05058CE4EC9E /* EmulatorProcess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39B690015331C39738C71DEC /* EmulatorProcess.swift */; };
+		58A724620A54131A9D6CCD85 /* CoreMotion.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8D8478DC8D0419D5DC0EB97D /* CoreMotion.framework */; };
 		0A1CC35AD7F76DA8863051F4 /* libcephes_128bit.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 6793B33043D20704F7DC734E /* libcephes_128bit.a */; };
 		128DD0A831B63143AB9E167C /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 29341BBA8D8D92231E8DE5CF /* Metal.framework */; };
 		1478E49B697924BBC06B0941 /* Game.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9B5C8E056F7CA6D05CFF6CD /* Game.swift */; };
@@ -180,6 +181,7 @@
 		9355CEDF603E23975E5723D6 /* libtiny-json.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = "libtiny-json.a"; path = "../runtime/build/shadps4-ios/fexcore-ios-libs/libtiny-json.a"; sourceTree = "<group>"; };
 		951FB9307C647FFAAC324FA3 /* libxxhash.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libxxhash.a; path = "../runtime/build/shadps4-ios/fexcore-ios-libs/libxxhash.a"; sourceTree = "<group>"; };
 		9551995AAD54DE44A2993E62 /* CoreBluetooth.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreBluetooth.framework; path = System/Library/Frameworks/CoreBluetooth.framework; sourceTree = SDKROOT; };
+		8D8478DC8D0419D5DC0EB97D /* CoreMotion.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreMotion.framework; path = System/Library/Frameworks/CoreMotion.framework; sourceTree = SDKROOT; };
 		95CA1D12C5BA25815763D6FF /* libhwinfo_disk.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libhwinfo_disk.a; path = "../runtime/build/shadps4-ios/externals/hwinfo/src/libhwinfo_disk.a"; sourceTree = "<group>"; };
 		9639AD8D6ED90FC8DB5BAA5A /* libImGuiFileDialog.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libImGuiFileDialog.a; path = "../runtime/build/shadps4-ios/externals/libImGuiFileDialog.a"; sourceTree = "<group>"; };
 		A03F2841182BD6A15547FAEB /* GameController.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GameController.framework; path = System/Library/Frameworks/GameController.framework; sourceTree = SDKROOT; };
@@ -294,6 +296,7 @@
 				A295CF2D0141D242F3B3CC7B /* CoreAudio.framework in Frameworks */,
 				9A2D46DD23D75A2A1A95A929 /* AudioToolbox.framework in Frameworks */,
 				D2F867EE6885CB623881B5FE /* CoreBluetooth.framework in Frameworks */,
+				58A724620A54131A9D6CCD85 /* CoreMotion.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -359,6 +362,7 @@
 				8C64DD8928157D6754D73D2B /* CoreAudio.framework */,
 				5E7AC5E5BE26A9E222692736 /* AudioToolbox.framework */,
 				9551995AAD54DE44A2993E62 /* CoreBluetooth.framework */,
+				8D8478DC8D0419D5DC0EB97D /* CoreMotion.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";

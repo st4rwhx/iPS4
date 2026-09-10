@@ -463,9 +463,18 @@ jobs:
           # tree, so this source-tree glob never sees them and needs no exclusion for that
           # directory: the hand-written files here are genuinely meant to compile straight into
           # shadps4_ios like everything else under src/.
+          # src/core/pkg_extract/aes.c (tiny-AES-c, providing AES_init_ctx/AES_init_ctx_iv/
+          # AES_CBC_decrypt_buffer for pkg_crypto.cpp's PKG decryption) is the sole plain-C
+          # file anywhere under src/ (confirmed: `find src -iname "*.c"` returns exactly this
+          # one file) -- the glob never picked up *.c at all, so it silently never got compiled,
+          # only surfacing as an Xcode-stage "Undefined symbols" linker error since CMake/ninja
+          # itself had nothing to complain about (nothing ever referenced the missing object at
+          # its own link time -- shadps4_ios is a static library, so an unresolved symbol inside
+          # it is invisible until something actually links the .a into an executable).
           file(GLOB_RECURSE SHADPS4_IOS_SOURCES CONFIGURE_DEPENDS
                "${CMAKE_CURRENT_SOURCE_DIR}/../src/*.cpp"
-               "${CMAKE_CURRENT_SOURCE_DIR}/../src/*.mm")
+               "${CMAKE_CURRENT_SOURCE_DIR}/../src/*.mm"
+               "${CMAKE_CURRENT_SOURCE_DIR}/../src/*.c")
 
           # src/core/libraries/usbd/ implements real USB peripheral passthrough (Guitar Hero
           # controllers, Skylanders portal, Disney Infinity base) via libusb -- genuinely
@@ -545,6 +554,77 @@ jobs:
               "${SHADPS4_IOS_RESOURCE_ROOT}/big_picture/folder.png"
               "${SHADPS4_IOS_RESOURCE_ROOT}/big_picture/profiles.png"
           )
+
+          # common/scm_rev.cpp.in is a configure_file() template (its own @VAR@ placeholders
+          # confirm this -- never a plain source file) providing Common::g_version/g_scm_rev/
+          # g_scm_branch/g_scm_desc/g_scm_remote_name/g_scm_remote_url/g_scm_date/
+          # GetRemoteNameFromLink(), declared in common/scm_rev.h and referenced (unconditionally,
+          # no #ifdef) from emulator.cpp's PrepareWindow, emulator_settings.cpp, and
+          # user_settings.cpp. Nothing in this from-scratch wrapper ever generated
+          # common/scm_rev.cpp from it, so those globals were simply never defined anywhere --
+          # invisible at CMake/ninja time for the same reason as aes.c above (unresolved symbols
+          # inside a static library don't surface until something links the .a), only showing up
+          # as Xcode-stage "Undefined symbols" errors. tests/CMakeLists.txt's own
+          # stubs/scm_rev_stub.cpp confirms hardcoded values satisfy the linker fine for a
+          # non-release build, but since this is meant to be a real, working app rather than a
+          # unit test target, populate the template properly via git introspection (falling back
+          # to "unknown" wherever git isn't available, e.g. a shallow checkout) instead of
+          # reusing the test-only stub's fake values.
+          find_package(Git QUIET)
+          set(SHADPS4_IOS_GIT_REV "unknown")
+          set(SHADPS4_IOS_GIT_BRANCH "unknown")
+          set(SHADPS4_IOS_GIT_DESC "unknown")
+          set(SHADPS4_IOS_GIT_REMOTE_URL "https://github.com/st4rwhx/iPS4")
+          if(GIT_EXECUTABLE)
+            execute_process(
+              COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+              WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
+              OUTPUT_VARIABLE SHADPS4_IOS_GIT_REV_OUT
+              OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET RESULT_VARIABLE SHADPS4_IOS_GIT_RC)
+            if(SHADPS4_IOS_GIT_RC EQUAL 0 AND SHADPS4_IOS_GIT_REV_OUT)
+              set(SHADPS4_IOS_GIT_REV "${SHADPS4_IOS_GIT_REV_OUT}")
+            endif()
+            execute_process(
+              COMMAND "${GIT_EXECUTABLE}" rev-parse --abbrev-ref HEAD
+              WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
+              OUTPUT_VARIABLE SHADPS4_IOS_GIT_BRANCH_OUT
+              OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET RESULT_VARIABLE SHADPS4_IOS_GIT_RC)
+            if(SHADPS4_IOS_GIT_RC EQUAL 0 AND SHADPS4_IOS_GIT_BRANCH_OUT)
+              set(SHADPS4_IOS_GIT_BRANCH "${SHADPS4_IOS_GIT_BRANCH_OUT}")
+            endif()
+            execute_process(
+              COMMAND "${GIT_EXECUTABLE}" describe --always --long --dirty
+              WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
+              OUTPUT_VARIABLE SHADPS4_IOS_GIT_DESC_OUT
+              OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET RESULT_VARIABLE SHADPS4_IOS_GIT_RC)
+            if(SHADPS4_IOS_GIT_RC EQUAL 0 AND SHADPS4_IOS_GIT_DESC_OUT)
+              set(SHADPS4_IOS_GIT_DESC "${SHADPS4_IOS_GIT_DESC_OUT}")
+            endif()
+            execute_process(
+              COMMAND "${GIT_EXECUTABLE}" config --get remote.origin.url
+              WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
+              OUTPUT_VARIABLE SHADPS4_IOS_GIT_REMOTE_URL_OUT
+              OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET RESULT_VARIABLE SHADPS4_IOS_GIT_RC)
+            if(SHADPS4_IOS_GIT_RC EQUAL 0 AND SHADPS4_IOS_GIT_REMOTE_URL_OUT)
+              set(SHADPS4_IOS_GIT_REMOTE_URL "${SHADPS4_IOS_GIT_REMOTE_URL_OUT}")
+            endif()
+          endif()
+          string(TIMESTAMP SHADPS4_IOS_BUILD_DATE "%Y-%m-%d")
+
+          set(APP_VERSION "${SHADPS4_IOS_GIT_DESC}")
+          set(APP_IS_RELEASE "false")
+          set(GIT_REV "${SHADPS4_IOS_GIT_REV}")
+          set(GIT_BRANCH "${SHADPS4_IOS_GIT_BRANCH}")
+          set(GIT_DESC "${SHADPS4_IOS_GIT_DESC}")
+          set(GIT_REMOTE_NAME "origin")
+          set(GIT_REMOTE_URL "${SHADPS4_IOS_GIT_REMOTE_URL}")
+          set(BUILD_DATE "${SHADPS4_IOS_BUILD_DATE}")
+          configure_file(
+              "${CMAKE_CURRENT_SOURCE_DIR}/../src/common/scm_rev.cpp.in"
+              "${CMAKE_CURRENT_BINARY_DIR}/generated/scm_rev.cpp"
+              @ONLY
+          )
+          list(APPEND SHADPS4_IOS_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/generated/scm_rev.cpp")
 
           add_library(shadps4_ios STATIC ${SHADPS4_IOS_SOURCES})
           add_dependencies(shadps4_ios host_shaders)
