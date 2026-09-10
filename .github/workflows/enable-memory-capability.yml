@@ -1,5 +1,16 @@
 name: Enable Extended Virtual Addressing capability
 
+# IMPORTANT SCOPE NOTE: App ID capabilities are registered per Apple Developer TEAM (i.e. per
+# Apple ID), not globally per bundle identifier -- running this workflow only enables the
+# capability for whichever Apple ID's FASTLANE_USER/FASTLANE_SESSION secrets are configured on
+# THIS repo (the maintainer's own testing account). It does nothing for anyone else who
+# sideloads this app with their own Apple ID -- there is no way to "pre-enable" this for
+# everyone from CI, since each person's SideStore/AltStore install registers its own separate
+# App ID under their own team. Other users need to run the exact same fastlane commands
+# themselves, locally, with their own Apple ID -- see docs/memory-entitlement-setup.md for
+# that self-service, no-Mac-required version (this workflow is that same recipe, just also
+# wired up here for repeatable use against the maintainer's own account).
+#
 # Manual, credential-touching utility -- deliberately its own workflow, never auto-triggered
 # by push/PR, so a real Apple ID session is only ever used when someone explicitly runs it.
 #

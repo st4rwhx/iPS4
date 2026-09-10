@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // Blocking launch-time check: confirms the two preconditions the emulator actually
 // depends on before letting the user into the library --
@@ -127,10 +128,18 @@ struct SetupCheckView: View {
                 }
             }
             if memoryPhase == .failed {
-                Text("This install is missing both the increased-memory-limit and extended-virtual-addressing entitlements. This app's own .entitlements already requests them, but the sideloading tool that actually signed this install must be one that's authorized to grant them -- AltStore (2.2+) supports requesting Increased Memory Limit directly when sideloading, or use GetMoreRam (github.com/hugeBlack/GetMoreRam) to re-sign an already-installed build with it. A free Apple ID is enough; no paid developer account required.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+                VStack(spacing: 8) {
+                    Text("This install is missing both memory entitlements. This app's own .entitlements already requests them, but your Apple ID's App ID needs the matching capability enabled on Apple's Developer Portal before a sideloading tool can actually grant either one -- this is per-Apple-ID, so no build of this app can ship it pre-enabled for everyone. Free Apple ID, no paid account needed.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Button {
+                        UIApplication.shared.open(URL(string: "https://github.com/st4rwhx/iPS4/blob/main/docs/memory-entitlement-setup.md")!)
+                    } label: {
+                        Label("Self-service fix (no Mac needed)", systemImage: "arrow.up.forward.app")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
             }
         }
         .padding(.horizontal, 8)
