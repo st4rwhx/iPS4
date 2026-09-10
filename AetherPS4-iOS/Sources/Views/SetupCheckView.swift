@@ -2,7 +2,10 @@ import SwiftUI
 
 // Blocking launch-time check: confirms the two preconditions the emulator actually
 // depends on before letting the user into the library --
-//   1. The increased-memory-limit entitlement is present in this build's signature.
+//   1. Either the increased-memory-limit or extended-virtual-addressing entitlement is
+//      present in this build's signature (either one is commonly enough to avoid jetsam
+//      kills under memory pressure; which one, if any, a given sideloading tool is actually
+//      authorized to grant varies -- see the failure message below for remedies).
 //   2. StikDebug is attached AND its JIT script is actually servicing BRK requests.
 //
 // (2) is checked in two steps, not one straight call into shadps4_probe_jit(): that
@@ -41,7 +44,7 @@ struct SetupCheckView: View {
                 header
 
                 VStack(alignment: .leading, spacing: 0) {
-                    checkRow(title: "Memory Entitlement", detail: "com.apple.developer.kernel.increased-memory-limit", phase: memoryPhase)
+                    checkRow(title: "Memory Entitlement", detail: "increased-memory-limit or extended-virtual-addressing", phase: memoryPhase)
                     Divider().padding(.leading, 52)
                     checkRow(title: "JIT Script (StikDebug)", detail: "Required for guest code execution", phase: jitPhase)
                 }
@@ -124,7 +127,7 @@ struct SetupCheckView: View {
                 }
             }
             if memoryPhase == .failed {
-                Text("This build is missing the increased-memory-limit entitlement. Reinstall a build signed with it.")
+                Text("This install is missing both the increased-memory-limit and extended-virtual-addressing entitlements. This app's own .entitlements already requests them, but the sideloading tool that actually signed this install must be one that's authorized to grant them -- AltStore (2.2+) supports requesting Increased Memory Limit directly when sideloading, or use GetMoreRam (github.com/hugeBlack/GetMoreRam) to re-sign an already-installed build with it. A free Apple ID is enough; no paid developer account required.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -172,7 +175,16 @@ struct SetupCheckView: View {
         jitPhase = .pending
 
         DispatchQueue.global(qos: .userInitiated).async {
+            // Either entitlement addresses the same underlying problem (the emulator getting
+            // jetsam-killed under memory pressure) from a different angle -- increased-memory-
+            // limit raises the resident-memory ceiling directly, extended-virtual-addressing
+            // relieves address-space fragmentation from many mmap() regions -- and in practice
+            // either one alone is commonly enough. Both are declared in this app's own
+            // .entitlements, but which one (if either) a given sideloading tool is actually
+            // authorized to grant varies, so accept whichever one made it into this install's
+            // real signature rather than hard-requiring one specific key.
             let memoryOk = checkAppEntitlement("com.apple.developer.kernel.increased-memory-limit")
+                || checkAppEntitlement("com.apple.developer.kernel.extended-virtual-addressing")
             DispatchQueue.main.async {
                 memoryPhase = memoryOk ? .ok : .failed
                 jitPhase = .checking
