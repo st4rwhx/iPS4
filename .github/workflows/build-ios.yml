@@ -946,6 +946,37 @@ jobs:
           path: spike-ipa-out/AetherPS4-iOS.ipa
           if-no-files-found: warn
 
+      # Auto-release: ONE GitHub Release, always at the fixed tag "ios-latest", overwritten
+      # in place on every successful build -- deliberately not a new tag/release per build
+      # (which would just pile up an ever-growing releases list). The version number in the
+      # release's own name/body still moves forward every time (github.run_number is a
+      # monotonically increasing counter scoped to this workflow, unique per run with zero
+      # extra state to track), so "latest" always means both "the newest version" and "the
+      # newest passing build" at once. Gated on packageipa succeeding specifically (not just
+      # xcodebuild4) so a build that compiled but failed to package never overwrites the last
+      # good release with a missing/stale IPA.
+      - name: Publish/overwrite iOS auto-release
+        id: publishrelease
+        if: steps.packageipa.outcome == 'success'
+        continue-on-error: true
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ios-latest
+          name: "AetherPS4 iOS build v0.1.${{ github.run_number }}"
+          body: |
+            Automated unsigned iOS build from this repo's own CI pipeline (Stage 1-4: FEXCore, externals, shadps4_ios, Xcode app + IPA packaging).
+
+            - Version: v0.1.${{ github.run_number }}
+            - Commit: ${{ github.sha }}
+            - Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Unsigned -- install via sideloading (StikDebug, AltStore, etc.). This release is overwritten on every successful build and always reflects the latest passing commit on main.
+          files: spike-ipa-out/AetherPS4-iOS.ipa
+          make_latest: true
+          prerelease: false
+
       - name: Upload ALL spike logs (always)
         if: always()
         uses: actions/upload-artifact@v4
