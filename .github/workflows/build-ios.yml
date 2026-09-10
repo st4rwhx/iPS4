@@ -702,6 +702,134 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           find runtime/build/shadps4-ios/externals -name "libshadps4_ios.a" 2>/dev/null | tee spike-shadps4ios-libs.txt
 
+      # Stage 4: build AetherPS4-iOS.xcodeproj (the real, pre-existing SwiftUI app shell --
+      # confirmed by direct read: only .swift files are in its PBXSourcesBuildPhase, our C++
+      # is consumed purely as linked .a's declared via PBXFileReference/LIBRARY_SEARCH_PATHS,
+      # so there's no duplicate-symbol risk from also compiling our sources a second time here)
+      # against the libshadps4_ios.a Stage 3 just produced, unsigned, then package an IPA.
+      #
+      # The .xcodeproj's own build settings (LIBRARY_SEARCH_PATHS =
+      # $(SRCROOT)/../runtime/build/shadps4-ios(/**)) expect every library at a flat,
+      # "canonical" tree rooted at runtime/build/shadps4-ios/ -- e.g.
+      # runtime/build/shadps4-ios/fexcore-ios-libs/libFEXCore.a,
+      # runtime/build/shadps4-ios/externals/hwinfo/src/libhwinfo_battery.a,
+      # runtime/build/shadps4-ios/libshadps4_ios.a. Our own from-scratch wrapper (necessary
+      # since, per this file's own history above, there's no public real root CMakeLists.txt to
+      # build from directly) uses runtime/build/shadps4-ios/externals as its own CMake
+      # CMAKE_BINARY_DIR instead (a naming choice made early in this pipeline's development,
+      # long before Stage 4 was reachable) -- so FEXCore's libs land under a completely
+      # different tree (runtime/build/fexcore-ios/**, flattened by name only in the .pbxproj's
+      # expectation), externals/ libs land one directory deeper than expected
+      # (.../externals/externals-build/X instead of .../externals/X, since our wrapper's
+      # add_subdirectory(externals externals-build) explicitly names the binary subdir), and
+      # two targets carry different names entirely: our CMakeRC resource library is named
+      # "res" (producing libres.a) where the project expects "libembedded-resources.a", and
+      # our add_subdirectory(src/imgui/renderer imgui-renderer-build) flattens what the
+      # project expects nested at src/imgui/renderer/libImGui_Resources.a.
+      #
+      # Rather than hand-maintain a frozen copy of today's ~47-entry path list (which would
+      # silently drift out of sync the next time someone edits the .xcodeproj), this step
+      # parses every "../runtime/build/..." PBXFileReference path directly out of the live
+      # project.pbxproj at CI time, and locates the real source file for each one using the
+      # mapping rules above -- failing the step loudly (not silently skipping) if any expected
+      # library can't be found, so a real gap surfaces as an honest red step instead of a
+      # mysterious xcodebuild linker error two steps later.
+      - name: Stage libraries for AetherPS4-iOS.xcodeproj (Stage 4 prep)
+        id: stagelibs
+        if: steps.shadps4iosbuild.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          PBXPROJ="AetherPS4-iOS/AetherPS4-iOS.xcodeproj/project.pbxproj"
+          STAGE_LOG="spike-stage4-stage.log"
+          : > "$STAGE_LOG"
+
+          fail=0
+          while IFS= read -r relpath; do
+            # relpath is e.g. "shadps4-ios/externals/hwinfo/src/libhwinfo_battery.a",
+            # relative to runtime/build/.
+            dest="runtime/build/${relpath}"
+            base="$(basename "$relpath")"
+            src=""
+
+            case "$relpath" in
+              shadps4-ios/fexcore-ios-libs/*)
+                # Stage 1's own tree, flattened by basename -- 12 libs, no naming collisions
+                # within that tree (confirmed: fmt/xxhash appear a second time only under
+                # externals/, a disjoint search scope from this one).
+                src="$(find runtime/build/fexcore-ios -name "$base" 2>/dev/null | head -n1)"
+                ;;
+              shadps4-ios/libembedded-resources.a)
+                src="runtime/build/shadps4-ios/externals/libres.a"
+                ;;
+              shadps4-ios/src/imgui/renderer/libImGui_Resources.a)
+                src="runtime/build/shadps4-ios/externals/imgui-renderer-build/libImGui_Resources.a"
+                ;;
+              shadps4-ios/externals/*)
+                rest="${relpath#shadps4-ios/externals/}"
+                src="runtime/build/shadps4-ios/externals/externals-build/${rest}"
+                ;;
+              shadps4-ios/_deps/*)
+                rest="${relpath#shadps4-ios/}"
+                src="runtime/build/shadps4-ios/externals/${rest}"
+                ;;
+              shadps4-ios/libshadps4_ios.a)
+                src="runtime/build/shadps4-ios/externals/libshadps4_ios.a"
+                ;;
+              *)
+                echo "UNRECOGNIZED expected path pattern (no staging rule): $relpath" | tee -a "$STAGE_LOG"
+                fail=1
+                continue
+                ;;
+            esac
+
+            if [[ -z "$src" || ! -f "$src" ]]; then
+              echo "MISSING: $relpath  (looked for: ${src:-<none found>})" | tee -a "$STAGE_LOG"
+              fail=1
+              continue
+            fi
+
+            mkdir -p "$(dirname "$dest")"
+            cp -f "$src" "$dest"
+            echo "OK: $dest  <=  $src" | tee -a "$STAGE_LOG"
+          done < <(grep -oE '"\.\./runtime/build/[^"]+"' "$PBXPROJ" | tr -d '"' | sed 's#^\.\./runtime/build/##' | sort -u)
+
+          if [[ "$fail" -ne 0 ]]; then
+            echo "One or more expected libraries could not be staged; see $STAGE_LOG" >&2
+            exit 1
+          fi
+          echo "All expected libraries staged successfully:"
+          cat "$STAGE_LOG"
+
+      - name: Build AetherPS4-iOS.xcodeproj (Stage 4, unsigned)
+        id: xcodebuild4
+        if: steps.stagelibs.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -x
+          cd AetherPS4-iOS
+          xcodebuild \
+            -project AetherPS4-iOS.xcodeproj \
+            -target AetherPS4-iOS \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee ../spike-xcodebuild.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Summarize Stage 4 (Xcode build)
+        if: always()
+        run: |
+          echo "### Stage 4: AetherPS4-iOS.xcodeproj" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -30 spike-stage4-stage.log 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || true
+          grep -iE "error:|BUILD FAILED|BUILD SUCCEEDED" spike-xcodebuild.log 2>/dev/null | head -150 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          find /Users/runner/Library/Developer/Xcode/DerivedData -iname "AetherPS4-iOS.app" -maxdepth 6 2>/dev/null | tee spike-stage4-app.txt || true
+
       - name: Upload ALL spike logs (always)
         if: always()
         uses: actions/upload-artifact@v4
