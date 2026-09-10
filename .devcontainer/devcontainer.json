@@ -1,0 +1,10 @@
+{
+  "name": "AetherPS4-iOS memory-entitlement helper",
+  "image": "mcr.microsoft.com/devcontainers/ruby:1",
+  "postCreateCommand": "gem install fastlane --no-document",
+  "customizations": {
+    "codespaces": {
+      "openFiles": ["docs/memory-entitlement-setup.md"]
+    }
+  }
+}

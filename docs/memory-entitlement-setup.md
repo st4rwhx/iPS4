@@ -29,17 +29,34 @@ it -- the only known route is Xcode's own GUI (a real Mac). But
 `extended-virtual-addressing` *is* a fully documented, API-reachable
 capability, and this app already accepts it as an equally valid alternative.
 You can enable it for your own Apple ID with `fastlane`, which is a plain
-Ruby gem -- it runs on Linux, WSL, a GitHub Codespace, or macOS. No Mac, no
-Xcode, no paid Apple Developer Program membership required.
+Ruby gem. No Mac, no Xcode, no paid Apple Developer Program membership --
+and the two-factor approval below only your own device can complete, so
+there's no way around doing this yourself once, but this repo is set up so
+the *environment* for it costs you nothing to set up:
 
-1. **Install fastlane** (anywhere with Ruby):
+0. **Open a Codespace on this repo** -- github.com/st4rwhx/iPS4, green
+   "Code" button -> Codespaces tab -> "Create codespace on main". This opens
+   a full terminal in your browser (works from a phone, though a larger
+   screen makes typing the commands below easier) with `fastlane` already
+   installed for you -- nothing to configure. Skip step 1 below; go straight
+   to step 2 in the terminal panel that opens. (Delete the Codespace when
+   you're done -- Settings -> Codespaces on GitHub's site, or just let it
+   auto-stop; you won't need it again unless your session expires.)
+
+   If you'd rather use your own Linux/WSL/macOS machine instead, that works
+   identically -- just do step 1 there first.
+
+1. **Install fastlane** (only if not using the Codespace above, which
+   already has it):
    ```sh
    gem install fastlane
    ```
 
 2. **Authenticate once, interactively** (this is the only step that needs
    your own two-factor approval -- do it on whichever device gets your 2FA
-   prompts):
+   prompts). This genuinely can't be automated or split into two steps by
+   anyone, including a helper script or CI -- Apple's own two-factor flow
+   requires requesting and submitting the code in the same live session:
    ```sh
    fastlane spaceauth -u your@appleid.com
    ```
